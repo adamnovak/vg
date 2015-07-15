@@ -33,6 +33,8 @@ function get_1000g_vcf {
         echo "Skipping download of ${VCF_URL}"
     else
         curl -o "${OUTPUT_FILE}" "${VCF_URL}"
+        # Get the index too
+        curl -o "${OUTPUT_FILE}.tbi" "${VCF_URL}.tbi"
     fi
 }
 
@@ -45,7 +47,7 @@ function get_GRCh37_fasta {
     FASTA_URL="http://hgdownload.cse.ucsc.edu/goldenPath/hg19/chromosomes/chr${CONTIG}.fa.gz"
     
     # And the place to put it
-    OUTPUT_FILE="fa/${CONTIG}.fa.gz"
+    OUTPUT_FILE="fa/${CONTIG}.fa"
     
      if [ -e ${OUTPUT_FILE} ]
     then
@@ -53,7 +55,7 @@ function get_GRCh37_fasta {
         echo "Skipping download of ${FASTA_URL}"
     else
         # We're going to download the FASTA, but we need to strip the "chr" from the record names.
-        curl "${FASTA_URL}" | gzip -cd | sed "s/chr${CONTIG}/${CONTIG}/" | gzip -c > ${OUTPUT_FILE}
+        curl "${FASTA_URL}" | gzip -cd | sed "s/chr${CONTIG}/${CONTIG}/" > ${OUTPUT_FILE}
     fi
 }
 
@@ -81,7 +83,7 @@ do
     
     # Build the vg graph for this contig
     echo "Building VG graph for chromosome ${CONTIG}"
-    time -v ../../vg construct -r "${CONTIG}.fa.gz" -v "${CONTIG}.vcf.gz" -R "${CONTIG}" -p > "vg_parts/${CONTIG}.vg"
+    time -v ../../vg construct -r "fa/${CONTIG}.fa" -v "vcf/${CONTIG}.vcf.gz" -R "${CONTIG}" -p > "vg_parts/${CONTIG}.vg"
 done
 
 # Now we put them in the same ID space
