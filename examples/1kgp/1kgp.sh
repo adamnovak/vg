@@ -24,18 +24,15 @@ function get_1000g_vcf {
         VCF_URL="${BASE_URL}/ALL.chr${CONTIG}.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz"
     fi
     
+    echo "Retrieving ${VCF_URL}"
+    
     # Where do we save it?
     OUTPUT_FILE="vcf/${CONTIG}.vcf.gz"
     
-    if [ -e ${OUTPUT_FILE} ]
-    then
-        # Don't get the same file twice.
-        echo "Skipping download of ${VCF_URL}"
-    else
-        curl -o "${OUTPUT_FILE}" "${VCF_URL}"
-        # Get the index too
-        curl -o "${OUTPUT_FILE}.tbi" "${VCF_URL}.tbi"
-    fi
+    # Download the VCF. If any is already downloaded, resume.
+    curl -C - -o "${OUTPUT_FILE}" "${VCF_URL}"
+    # Get the index too
+    curl -C - -o "${OUTPUT_FILE}.tbi" "${VCF_URL}.tbi"
 }
 
 # Function to download GRCh37 reference FASTAs per chromosome
@@ -48,15 +45,15 @@ function get_GRCh37_fasta {
     
     # And the place to put it
     OUTPUT_FILE="fa/${CONTIG}.fa"
+    OUTPUT_FILE_ZIPPED="${OUTPUT_FILE}.gz"
     
-     if [ -e ${OUTPUT_FILE} ]
-    then
-        # Don't get the same file twice.
-        echo "Skipping download of ${FASTA_URL}"
-    else
-        # We're going to download the FASTA, but we need to strip the "chr" from the record names.
-        curl "${FASTA_URL}" | gzip -cd | sed "s/chr${CONTIG}/${CONTIG}/" > ${OUTPUT_FILE}
-    fi
+    echo "Retrieving ${FASTA_URL}"
+    
+    # Go download the zipped version
+    curl -C - -o "${OUTPUT_FILE_ZIPPED}" "${FASTA_URL}"
+
+    # We need to strip the "chr" from the record names, and unzip for vg.
+    zcat "${OUTPUT_FILE_ZIPPED}" | sed "s/chr${CONTIG}/${CONTIG}/" > ${OUTPUT_FILE}
 }
 
 if [ ! -e $0 ]
@@ -64,6 +61,9 @@ then
     echo "Please run from the script's directory."
     exit 1
 fi
+
+# We want time output on our stdout, but vg progress abr stuff on our stderr
+TIME_FILE="$(mktemp)"
 
 # Make the input file directories
 mkdir -p vcf
@@ -83,12 +83,15 @@ do
     
     # Build the vg graph for this contig
     echo "Building VG graph for chromosome ${CONTIG}"
-    time -v ../../vg construct -r "fa/${CONTIG}.fa" -v "vcf/${CONTIG}.vcf.gz" -R "${CONTIG}" -p > "vg_parts/${CONTIG}.vg"
+    # We redirect time's error to our output.
+    time -v -o "${TIME_FILE}" ../../vg construct -r "fa/${CONTIG}.fa" -v "vcf/${CONTIG}.vcf.gz" -R "${CONTIG}" -p > "vg_parts/${CONTIG}.vg"
+    cat "${TIME_FILE}"
 done
 
 # Now we put them in the same ID space
 echo "Re-numbering nodes to joint ID space..."
-time -v ../../vg ids -j vg_parts/*.vg
+time -v -o "${TIME_FILE}" ../../vg ids -j vg_parts/*.vg
+cat "${TIME_FILE}"
 
 # Now we concatenate all the parts into one file
 echo "Collecting subgraphs..."
@@ -96,7 +99,11 @@ cat vg_parts/*.vg > 1kgp.vg
 
 # And get some stats
 echo "Calculating statistics..."
-time -v ../../vg stats -zls 1kgp.vg
+time -v -o "${TIME_FILE}" ../../vg stats -zls 1kgp.vg 2>&3
+cat "${TIME_FILE}"
+
+rm "${TIME_FILE}"
+
 
 
 
