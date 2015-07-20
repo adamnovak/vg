@@ -16,23 +16,34 @@ function get_1000g_vcf {
     # What's the 1000g base url?
     BASE_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502"
     
-    if [ "$CONTIG" == "Y" ]
-    then
-        # chrY has a special filename
-        VCF_URL="${BASE_URL}/ALL.chr${CONTIG}.phase3_integrated_v1a.20130502.genotypes.vcf.gz"
-    else
-        VCF_URL="${BASE_URL}/ALL.chr${CONTIG}.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz"
-    fi
+    #if [ "$CONTIG" == "Y" ]
+    #then
+    #    # chrY has a special filename
+    #    VCF_URL="${BASE_URL}/ALL.chr${CONTIG}.phase3_integrated_v1a.20130502.genotypes.vcf.gz"
+    #else
+    #    VCF_URL="${BASE_URL}/ALL.chr${CONTIG}.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz"
+    #fi
+    
+    # Actually we will always use this one combined no-samples VCF.
+    # Trying to use the with-samples chr1 could use hundreds of gigabytes, because vg loads the whole vcf first.
+    VCF_URL="${BASE_URL}/ALL.wgs.phase3_shapeit2_mvncall_integrated_v5a.20130502.sites.vcf.gz"
     
     echo "Retrieving ${VCF_URL}"
     
     # Where do we save it?
     OUTPUT_FILE="vcf/${CONTIG}.vcf.gz"
     
+    # We download once and make links
+    DOWNLOAD_FILE="vcf/all.vcf.gz"    
+    
     # Download the VCF. If any is already downloaded, resume.
-    curl -C - -o "${OUTPUT_FILE}" "${VCF_URL}"
+    curl -C - -o "${DOWNLOAD_FILE}" "${VCF_URL}"
     # Get the index too
-    curl -C - -o "${OUTPUT_FILE}.tbi" "${VCF_URL}.tbi"
+    curl -C - -o "${DOWNLOAD_FILE}.tbi" "${VCF_URL}.tbi"
+    
+    # Make hard links
+    ln "${DOWNLOAD_FILE}" "${OUTPUT_FILE}"
+    ln "${DOWNLOAD_FILE}.tbi" "${OUTPUT_FILE}.tbi"
 }
 
 # Function to download GRCh37 reference FASTAs per chromosome
@@ -50,7 +61,8 @@ function get_GRCh37_fasta {
     echo "Retrieving ${FASTA_URL}"
     
     # Go download the zipped version
-    curl -C - -o "${OUTPUT_FILE_ZIPPED}" "${FASTA_URL}"
+    # Resume doesn't work properly for this server in http 1.1 if the file is done already.
+    curl -C - -0 -o "${OUTPUT_FILE_ZIPPED}" "${FASTA_URL}"
 
     # We need to strip the "chr" from the record names, and unzip for vg.
     zcat "${OUTPUT_FILE_ZIPPED}" | sed "s/chr${CONTIG}/${CONTIG}/" > ${OUTPUT_FILE}
@@ -69,37 +81,46 @@ TIME_FILE="$(mktemp)"
 mkdir -p vcf
 mkdir -p fa
 
+# Make a directory for all the VG files
+mkdir -p vg_parts
+
 # Loop over every chromosome
 for CONTIG in {1..22} X Y
 do
 
-
-    # Get the VCF and FASTA
-    get_1000g_vcf ${CONTIG}
-    get_GCRh37_fasta ${CONTIG}
+    if [ ! -e "vg_parts/${CONTIG}.vg" ]
+    then
     
-    # Make a directory for all the VG files
-    mkdir -p vg_parts
+        # Get the VCF and FASTA
+        get_1000g_vcf ${CONTIG}
+        get_GRCh37_fasta ${CONTIG}
     
-    # Build the vg graph for this contig
-    echo "Building VG graph for chromosome ${CONTIG}"
-    # We redirect time's error to our output.
-    time -v -o "${TIME_FILE}" ../../vg construct -r "fa/${CONTIG}.fa" -v "vcf/${CONTIG}.vcf.gz" -R "${CONTIG}" -p > "vg_parts/${CONTIG}.vg"
-    cat "${TIME_FILE}"
+        # Build the vg graph for this contig
+        echo "Building VG graph for chromosome ${CONTIG}"
+        # We redirect time's time info to a file, and then print it to stdout.
+        /usr/bin/time -v -o "${TIME_FILE}" ../../vg construct -r "fa/${CONTIG}.fa" -v "vcf/${CONTIG}.vcf.gz" -R "${CONTIG}" -p > "vg_parts/${CONTIG}.vg"
+        cat "${TIME_FILE}"
+        
+    fi
 done
 
-# Now we put them in the same ID space
-echo "Re-numbering nodes to joint ID space..."
-time -v -o "${TIME_FILE}" ../../vg ids -j vg_parts/*.vg
-cat "${TIME_FILE}"
+if [ ! -e 1kgp.vg ]
+then
 
-# Now we concatenate all the parts into one file
-echo "Collecting subgraphs..."
-cat vg_parts/*.vg > 1kgp.vg
+    # Now we put them in the same ID space
+    echo "Re-numbering nodes to joint ID space..."
+    /usr/bin/time -v -o "${TIME_FILE}" ../../vg ids -j vg_parts/*.vg
+    cat "${TIME_FILE}"
+
+    # Now we concatenate all the parts into one file
+    echo "Collecting subgraphs..."
+    cat vg_parts/*.vg > 1kgp.vg
+    
+fi
 
 # And get some stats
 echo "Calculating statistics..."
-time -v -o "${TIME_FILE}" ../../vg stats -zls 1kgp.vg 2>&3
+/usr/bin/time -v -o "${TIME_FILE}" ../../vg stats -z 1kgp.vg
 cat "${TIME_FILE}"
 
 rm "${TIME_FILE}"
