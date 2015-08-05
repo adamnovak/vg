@@ -3071,7 +3071,7 @@ bool VG::is_valid(void) {
 }
 
 void VG::to_dot(ostream& out, vector<Alignment> alignments) {
-    out << "graph graphname {" << endl;
+    out << "digraph graphname {" << endl;
     out << "    node [shape=plaintext];" << endl;
     out << "    rankdir=LR;" << endl;
     for (int i = 0; i < graph.node_size(); ++i) {
@@ -3091,14 +3091,18 @@ void VG::to_dot(ostream& out, vector<Alignment> alignments) {
         std::set_intersection(from_paths.begin(), from_paths.end(),
                               to_paths.begin(), to_paths.end(),
                               std::inserter(both_paths, both_paths.begin()));
+        
+        out << "    " << e->from() << " -> " << e->to() << "[dir=both"
+            << ",arrowtail=" << (e->from_start() ? "vee" : "crow") 
+            << ",arrowhead=" << (e->to_end() ? "crow" : "vee");
         // are both nodes in the same path?
         if (both_paths.empty()
             || !paths.are_consecutive_nodes_in_path(e->from(), e->to(), *both_paths.begin())) {
-            out << "    " << e->from() << " -- " << e->to() << "[color=red];" << endl;
-        } else {
-            // are the nodes consecutive in the path?
-            out << "    " << e->from() << " -- " << e->to() << ";" << endl;
+            // TODO: check if the nodes are consecutive in the right order and orientation to use this edge
+            out << ",color=red";
         }
+        
+        out << "];" << endl;
     }
     // add nodes for the alignments and link them to the nodes they match
     int alnid = max_node_id()+1;
