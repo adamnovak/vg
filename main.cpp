@@ -2707,8 +2707,16 @@ int main_map(int argc, char** argv) {
     string seq;
     string seq_name;
     string db_name;
+    // If the user specifies this by name, don't use rocksdb/gcsa2.
+    bool db_specified = false;
     string xg_name;
+    // If the user specifies -x explicitly, we can still use it when -d is
+    // specified explicitly.
+    bool xg_specified = false;
     string gcsa_name;
+    // If the user specifies -g explicitly, we can still use it when -d is
+    // specified explicitly.
+    bool gcsa_specified = false;
     int kmer_size = 0;
     int kmer_stride = 0;
     int sens_step = 0;
@@ -2937,14 +2945,17 @@ int main_map(int argc, char** argv) {
         file_name = argv[optind];
     }
 
+    db_specified = !db_name.empty();
     if (db_name.empty() && !file_name.empty()) {
             db_name = file_name + ".index";
     }
     
+    xg_specified = !xg_name.empty();
     if (xg_name.empty() && !file_name.empty()) {
             xg_name = file_name + ".xg";
     }
     
+    gcsa_specified = !gcsa_name.empty();
     if (gcsa_name.empty() && !file_name.empty()) {
             gcsa_name = file_name + gcsa::GCSA::EXTENSION;
     }
@@ -2955,8 +2966,9 @@ int main_map(int argc, char** argv) {
     // We try opening the file, and then see if it worked
     ifstream xg_stream(xg_name);
     
-    if(xg_stream) {
-        // We have an xg index!
+    if(xg_stream && (xg_specified || !db_specified)) {
+        // We have an xg index! And either the user didn't specify rocksdb, or
+        // they specified xg along with it.
         if(debug) {
             cerr << "Loading xg index " << xg_name << "..." << endl;
         }
@@ -2965,8 +2977,9 @@ int main_map(int argc, char** argv) {
     
     gcsa::GCSA* gcsa = nullptr;
     ifstream gcsa_stream(gcsa_name);
-    if(gcsa_stream) {
-        // We have a GCSA index too!
+    if(gcsa_stream && (gcsa_specified || !db_specified)) {
+        // We have a GCSA index too! And either the user didn't specify rocksdb,
+        // or they specified gcsa along with it.
         if(debug) {
             cerr << "Loading GCSA2 index " << gcsa_name << "..." << endl;
         }
@@ -2976,8 +2989,9 @@ int main_map(int argc, char** argv) {
     
     Index* idx = nullptr;
     
-    if(!xindex || !gcsa) {
-        // We only need a Rocksdb index if we don't have the others.
+    if(!xindex || !gcsa || db_specified) {
+        // We only need a Rocksdb index if we don't have the others and the user
+        // didn't ask for it.
         if(debug) {
             cerr << "Loading RocksDB index " << db_name << "..." << endl;
         }
