@@ -3131,6 +3131,7 @@ void VG::for_each_kpath_of_node(Node* n, int k, int edge_max,
     for_each_kpath_of_node(n, k, edge_max, prev_maxed, next_maxed, apply_to_path);
 }
 
+#define debug
 void VG::for_each_kpath_of_node(Node* node, int k, int edge_max,
                                 function<void(NodeTraversal)> prev_maxed,
                                 function<void(NodeTraversal)> next_maxed,
@@ -3144,6 +3145,22 @@ void VG::for_each_kpath_of_node(Node* node, int k, int edge_max,
                           empty_list, prev_paths, prev_maxed);
     next_kpaths_from_node(NodeTraversal(node), k, edge_max, (edge_max != 0),
                           empty_list, next_paths, next_maxed);
+                          
+#ifdef debug
+    // How long will it take? TODO: magic numbers are bad, estimate actually.
+    chrono::nanoseconds expected_time(9900 * prev_paths.size() * next_paths.size());
+    
+    auto expected_minutes = chrono::duration_cast<chrono::minutes>(expected_time).count();
+        
+    #pragma omp critical(cerr)
+    cerr << omp_get_thread_num() << ": Combining " << prev_paths.size() <<
+        " prev kpaths and " << next_paths.size() << " next kpaths (" << 
+        prev_paths.size() * next_paths.size() << " product) for node " <<
+        node->id() << " (~" << expected_minutes << " minutes)" << endl;
+        
+    auto start_time = chrono::high_resolution_clock::now();
+#endif
+                          
     // now take the cross and give to the callback
     for (set<list<NodeTraversal> >::iterator p = prev_paths.begin(); p != prev_paths.end(); ++p) {
         for (set<list<NodeTraversal> >::iterator n = next_paths.begin(); n != next_paths.end(); ++n) {
@@ -3163,7 +3180,26 @@ void VG::for_each_kpath_of_node(Node* node, int k, int edge_max,
             lambda(this_node, path);
         }
     }
+    
+#ifdef debug
+    auto end_time = chrono::high_resolution_clock::now();
+    
+    // Work out how long that took per combination
+    auto elapsed_time = end_time - start_time;
+    auto per_combo_time = elapsed_time / (prev_paths.size() * next_paths.size());
+    auto per_combo_ns = chrono::duration_cast<chrono::nanoseconds>(
+        per_combo_time).count();
+    auto total_ms = chrono::duration_cast<chrono::milliseconds>(
+        elapsed_time).count();
+    
+    #pragma omp critical(cerr)
+    cerr << omp_get_thread_num() << ": looking for more work (" <<
+        per_combo_ns << " ns per combination, " << total_ms <<
+        " ms total)." << endl;
+#endif
+    
 }
+#undef debug
 
 void VG::kpaths_of_node(Node* node, set<list<NodeTraversal> >& paths,
                         int length, int edge_max,
