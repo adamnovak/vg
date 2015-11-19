@@ -3164,22 +3164,28 @@ void VG::for_each_kpath_of_node(Node* node, int k, int edge_max,
     // now take the cross and give to the callback
     for (set<list<NodeTraversal> >::iterator p = prev_paths.begin(); p != prev_paths.end(); ++p) {
         for (set<list<NodeTraversal> >::iterator n = next_paths.begin(); n != next_paths.end(); ++n) {
-            list<NodeTraversal> path = *p;
+            // We make every combination an OpenMP task, to allow work stealing.
+            #pragma omp task firstprivate(p, n)
+            {
+            
+                list<NodeTraversal> path = *p;
+                
+                // Find the iterator to this node in the list that will become the
+                // path. We know it's the last thing in the prev kpath we made our path from.
+                list<NodeTraversal>::iterator this_node = path.end(); this_node--;
 
-            // Find the iterator to this node in the list that will become the
-            // path. We know it's the last thing in the prev kpath we made our path from.
-            list<NodeTraversal>::iterator this_node = path.end(); this_node--;
+                list<NodeTraversal>::const_iterator m = n->begin(); ++m; // skips current node, which is included in *p in the correct orientation
+                while (m != n->end()) {
+                    // Add on all the other nodes from the next kpath.
+                    path.push_back(*m);
+                    ++m;
+                }
 
-            list<NodeTraversal>::const_iterator m = n->begin(); ++m; // skips current node, which is included in *p in the correct orientation
-            while (m != n->end()) {
-                // Add on all the other nodes from the next kpath.
-                path.push_back(*m);
-                ++m;
+                lambda(this_node, path);
             }
-
-            lambda(this_node, path);
         }
     }
+    #pragma omp taskwait
     
 #ifdef debug
     auto end_time = chrono::high_resolution_clock::now();
