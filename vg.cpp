@@ -4902,10 +4902,9 @@ void VG::_for_each_kmer(int kmer_size,
                         
     // use an LRU cache to clean up duplicates over the last 1mb
     // assign each node to one, but since multiple threads can now process a node, we still need to lock the cache.
-    // If we aren't starting a parallel kmer iteration from here, just fill in 0.
-    // TODO: How do we know this is big enough?
     
-    int64_t num_caches = parallel ? omp_get_num_threads() : 1;
+    // We'll waste space if we aren't running in parallel, but too bad.
+    int64_t num_caches = omp_get_num_threads();
     
     map<int, LRUCache<string, bool>* > lru;
     map<int, omp_lock_t> lru_locks;
@@ -4913,10 +4912,37 @@ void VG::_for_each_kmer(int kmer_size,
     {
 #pragma omp single
         for (int i = 0; i < num_caches; ++i) {
+            // TODO: How do we know this is big enough?
             lru[i] = new LRUCache<string, bool>(100000);
             omp_init_lock(&lru_locks[i]);
         }
     }
+    
+#ifdef debug
+    // I don't really understand OMP teams, and it seems possible to not have
+    // the same number of threads in one of these parallel sections above as we
+    // have actually executing our callback. This is to try and work that out.
+#pragma omp critical (cerr)
+    cerr << num_caches << ", " << omp_get_num_threads() << ", " << omp_get_thread_num() << endl;
+#endif
+    
+    // We also have per-thread deduplication caches that we check before going
+    // to the cache for the node. If there's a duplicate in our thread cache, we
+    // don't need to lock the global cache. If we get into a situation with lots
+    // of repeat kmers, this ought to make things easier. We don't need to lock
+    // this because we're using tied tasks that never change threads in the
+    // middle.
+    
+    map<int, LRUCache<string, bool>* > thread_lru;
+#pragma omp parallel
+    {
+#pragma omp single
+        for (int i = 0; i < num_caches; ++i) {
+            thread_lru[i] = new LRUCache<string, bool>(100000);
+        }
+    }
+    
+    
     // constructs the cache key
     // experiment -- use a struct here
     // We deduplicate kmers based on where they start, where they end (optionally), and where they are viewed from.
@@ -4943,6 +4969,7 @@ void VG::_for_each_kmer(int kmer_size,
                         allow_negatives,
                         &lru,
                         &lru_locks,
+                        &thread_lru,
                         &num_caches,
                         &make_cache_key,
                         &parallel,
@@ -5166,30 +5193,50 @@ void VG::_for_each_kmer(int kmer_size,
                                                                  0, 0);
                     }
 
-                    // Which cache does this node use?
-                    int64_t node_cache = (*forward_node).node->id() % num_caches;
-
-                    // Get exclusive control of the cache for this node
-                    
-                    omp_set_lock(&lru_locks[node_cache]);
-                    
+                    // Which thread cache does this use? We're using tied tasks
+                    // that never change their threads in the middle.
+                    int64_t thread_cache = omp_get_thread_num();
                     
                     // See if this kmer is mentioned in the cache already
-                    pair<bool, bool> c = lru[node_cache]->retrieve(cache_key);
-                    if (!c.second && (*instance).node != NULL) {
-                        // TODO: how could we ever get a null node here?
-                        // If not, put it in and run on it.
-                        lru[node_cache]->put(cache_key, true);
+                    pair<bool, bool> nc = thread_lru[thread_cache]->retrieve(cache_key);
+                    if (!nc.second && (*instance).node != NULL) {
+                        // This is new for this thread. Save it to the thread cache.
+                        thread_lru[thread_cache]->put(cache_key, true);
                         
-                        omp_unset_lock(&lru_locks[node_cache]);
+                        // Now go on and run it by the node's cache to see if
+                        // any other thread has ever seen it.
+                        
+                        // Which cache does this node use?
+                        int64_t node_cache = (*forward_node).node->id() % num_caches;
 
-                        lambda(kmer, instance, kmer_relative_start, path, *this);
-                    } else {
-                        omp_unset_lock(&lru_locks[node_cache]);
+                        // Get exclusive control of the cache for this node
+                        omp_set_lock(&lru_locks[node_cache]);
+                        
+                        // See if this kmer is mentioned in the cache already
+                        pair<bool, bool> c = lru[node_cache]->retrieve(cache_key);
+                        if (!c.second) {
+                            // TODO: how could we ever get a null node here?
+                            // If not, put it in and run on it.
+                            lru[node_cache]->put(cache_key, true);
+                            
+                            omp_unset_lock(&lru_locks[node_cache]);
+
+                            lambda(kmer, instance, kmer_relative_start, path, *this);
+                        } else {
+                            // Another thread has seen this kmer
+                            omp_unset_lock(&lru_locks[node_cache]);
 #ifdef debug
-                        cerr << "Skipped " << kmer << " because it was already done" << endl;
+                            cerr << "Skipped " << kmer << " because it was already done by another thread" << endl;
+#endif
+                        }
+                    } else {
+                        // This thread has seen this before
+#ifdef debug
+                        cerr << "Skipped " << kmer << " because it was already done by this thread" << endl;
 #endif
                     }
+
+                    
 
                 }
                 ++j;
@@ -5211,12 +5258,17 @@ void VG::_for_each_kmer(int kmer_size,
         for_each_kpath_of_node(node, kmer_size, edge_max, noop, noop, handle_path);
     }
     
-    // Now clean up all the locks we made.
+    // Now clean up all the locks we made, and delete the LRU caches.
 #pragma omp parallel
     {
 #pragma omp single
         for (int i = 0; i < num_caches; ++i) {
             omp_destroy_lock(&lru_locks[i]);
+            delete lru[i];
+        }
+#pragma omp single
+        for (int i = 0; i < omp_get_num_threads(); ++i) {
+            delete thread_lru[i];
         }
     }
 }
