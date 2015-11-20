@@ -3131,7 +3131,6 @@ void VG::for_each_kpath_of_node(Node* n, int k, int edge_max,
     for_each_kpath_of_node(n, k, edge_max, prev_maxed, next_maxed, apply_to_path);
 }
 
-#define debug
 void VG::for_each_kpath_of_node(Node* node, int k, int edge_max,
                                 function<void(NodeTraversal)> prev_maxed,
                                 function<void(NodeTraversal)> next_maxed,
@@ -3160,7 +3159,7 @@ void VG::for_each_kpath_of_node(Node* node, int k, int edge_max,
         
     auto start_time = chrono::high_resolution_clock::now();
 #endif
-                          
+    
     // now take the cross and give to the callback
     for (set<list<NodeTraversal> >::iterator p = prev_paths.begin(); p != prev_paths.end(); ++p) {
         for (set<list<NodeTraversal> >::iterator n = next_paths.begin(); n != next_paths.end(); ++n) {
@@ -3205,7 +3204,6 @@ void VG::for_each_kpath_of_node(Node* node, int k, int edge_max,
 #endif
     
 }
-#undef debug
 
 void VG::kpaths_of_node(Node* node, set<list<NodeTraversal> >& paths,
                         int length, int edge_max,
@@ -4903,15 +4901,20 @@ void VG::_for_each_kmer(int kmer_size,
 #endif
                         
     // use an LRU cache to clean up duplicates over the last 1mb
-    // use one per thread so as to avoid contention
+    // assign each node to one, but since multiple threads can now process a node, we still need to lock the cache.
     // If we aren't starting a parallel kmer iteration from here, just fill in 0.
     // TODO: How do we know this is big enough?
+    
+    int64_t num_caches = parallel ? omp_get_num_threads() : 1;
+    
     map<int, LRUCache<string, bool>* > lru;
+    map<int, omp_lock_t> lru_locks;
 #pragma omp parallel
     {
 #pragma omp single
-        for (int i = 0; i < (parallel ? omp_get_num_threads() : 1); ++i) {
+        for (int i = 0; i < num_caches; ++i) {
             lru[i] = new LRUCache<string, bool>(100000);
+            omp_init_lock(&lru_locks[i]);
         }
     }
     // constructs the cache key
@@ -4939,6 +4942,8 @@ void VG::_for_each_kmer(int kmer_size,
                         allow_dups,
                         allow_negatives,
                         &lru,
+                        &lru_locks,
+                        &num_caches,
                         &make_cache_key,
                         &parallel,
                         &node](list<NodeTraversal>::iterator forward_node, list<NodeTraversal>& forward_path) {
@@ -4963,13 +4968,6 @@ void VG::_for_each_kmer(int kmer_size,
         // traversal but also distinguish different node instances in the path.
         vector<list<NodeTraversal>::iterator> node_by_path_position;
         expand_path(forward_path, node_by_path_position);
-
-        // Go get the cache for this thread if _for_each_kmer launched threads,
-        // and the only one we made (thread 0) if we're running this
-        // _for_each_kmer call in a single thread. Remember that _for_each_kmer
-        // itself may be called by many MPI threads in parallel.
-        auto cache = lru[parallel ? omp_get_thread_num() : 0];
-        assert(cache != nullptr);
 
         map<NodeTraversal*, int> node_start;
         node_starts_in_path(forward_path, node_start);
@@ -5168,15 +5166,26 @@ void VG::_for_each_kmer(int kmer_size,
                                                                  0, 0);
                     }
 
+                    // Which cache does this node use?
+                    int64_t node_cache = (*forward_node).node->id() % num_caches;
+
+                    // Get exclusive control of the cache for this node
+                    
+                    omp_set_lock(&lru_locks[node_cache]);
+                    
+                    
                     // See if this kmer is mentioned in the cache already
-                    pair<bool, bool> c = cache->retrieve(cache_key);
+                    pair<bool, bool> c = lru[node_cache]->retrieve(cache_key);
                     if (!c.second && (*instance).node != NULL) {
                         // TODO: how could we ever get a null node here?
                         // If not, put it in and run on it.
-                        cache->put(cache_key, true);
+                        lru[node_cache]->put(cache_key, true);
+                        
+                        omp_unset_lock(&lru_locks[node_cache]);
 
                         lambda(kmer, instance, kmer_relative_start, path, *this);
                     } else {
+                        omp_unset_lock(&lru_locks[node_cache]);
 #ifdef debug
                         cerr << "Skipped " << kmer << " because it was already done" << endl;
 #endif
@@ -5201,7 +5210,15 @@ void VG::_for_each_kmer(int kmer_size,
         // Look only at kpaths of the specified node
         for_each_kpath_of_node(node, kmer_size, edge_max, noop, noop, handle_path);
     }
-
+    
+    // Now clean up all the locks we made.
+#pragma omp parallel
+    {
+#pragma omp single
+        for (int i = 0; i < num_caches; ++i) {
+            omp_destroy_lock(&lru_locks[i]);
+        }
+    }
 }
 
 int VG::path_edge_count(list<NodeTraversal>& path, int32_t offset, int path_length) {
@@ -5426,15 +5443,23 @@ void VG::gcsa_handle_node_in_graph(Node* node, int kmer_size, int edge_max, int 
 #ifdef debug
     cerr << "Visiting node " << node->id() << endl;
 #endif
-    // This function runs in only one thread on a given node, so we can keep
-    // our cache here. We gradually fill in each KmerPosition with all the
+    // We gradually fill in each KmerPosition with all the
     // next positions and characters reachable with its string from its
     // orientation and offset along that strand in this node.
-    map<tuple<string, bool, int32_t>, KmerPosition> cache;
+    // We allow fine-grained locking of each KmerPosition.
+    map<tuple<string, bool, int32_t>, pair<omp_lock_t, KmerPosition>> cache;
+    
+    // This function's callbacks can end up running in many tasks, so we need to
+    // be able to lock that cache.
+    omp_lock_t cache_lock;
+    omp_init_lock(&cache_lock);
+    
+    // TO AVOID DEADLOCKS, the fine-grained locks must always be released
+    // without needing to acquire the coarse lock again!
 
     // We're going to visit every kmer of the node and run this:
     function<void(string&, list<NodeTraversal>::iterator, int, list<NodeTraversal>&, VG&)>
-        visit_kmer = [&cache, &kmer_size, &edge_max, &node, &forward_only, &head_node, &tail_node, this]
+        visit_kmer = [&cache, &cache_lock, &kmer_size, &edge_max, &node, &forward_only, &head_node, &tail_node, this]
         (string& kmer, list<NodeTraversal>::iterator start_node, int start_pos, 
          list<NodeTraversal>& path, VG& graph) {
                          
@@ -5475,6 +5500,7 @@ void VG::gcsa_handle_node_in_graph(Node* node, int kmer_size, int edge_max, int 
                 
             // Get the KmerPosition to fill, creating it if it doesn't exist already.
             auto cache_key = make_tuple(kmer, start_node->backward, start_pos);
+            omp_set_lock(&cache_lock);
 #ifdef debug
             if(cache.count(cache_key)) {
                 cerr << "F: Adding to " << kmer << " at " << start_node->node->id() << " " << start_node->backward
@@ -5484,7 +5510,21 @@ void VG::gcsa_handle_node_in_graph(Node* node, int kmer_size, int edge_max, int 
                      << " offset " << start_pos << endl;
             }
 #endif
-            KmerPosition& forward_kmer = cache[cache_key];
+            // We need to initialize this KmerPosition and its lock if we're the
+            // first one here.
+            bool init_lock = !cache.count(cache_key);
+            auto& lock_and_position = cache[cache_key];
+            if(init_lock) {
+                // Make the lock.
+                omp_init_lock(&lock_and_position.first);
+            }
+            // Get the fine-grained lock
+            omp_set_lock(&lock_and_position.first);
+            KmerPosition& forward_kmer = lock_and_position.second;
+            // Unlock the cache. We can keep working on this kmer, because
+            // nobody else can get it.
+            // TODO: one person waiting on it can block everyone else waiting on other kmers...
+            omp_unset_lock(&cache_lock);
 
             // fix up the context by swapping reverse-complements of the head and tail node
             // with their forward versions
@@ -5546,6 +5586,9 @@ void VG::gcsa_handle_node_in_graph(Node* node, int kmer_size, int edge_max, int 
                 ps << target_node << ":" << (target_node_backward?"-":"") << target_off;
                 forward_kmer.next_positions.insert(ps.str());
             }
+            
+            // Unlock this kmer
+            omp_unset_lock(&lock_and_position.first);
         }
 
         if(end_node->node == node && !forward_only) {
@@ -5558,6 +5601,7 @@ void VG::gcsa_handle_node_in_graph(Node* node, int kmer_size, int edge_max, int 
             // the other way, but since end_pos already counts from the end,
             // we don't touch it.
             auto cache_key = make_tuple(reverse_complement(kmer), !end_node->backward, end_pos);
+            omp_set_lock(&cache_lock);
 #ifdef debug
             if(cache.count(cache_key)) {
                 cerr << "R: Adding to " << reverse_complement(kmer) << " at " << end_node->node->id() 
@@ -5567,7 +5611,21 @@ void VG::gcsa_handle_node_in_graph(Node* node, int kmer_size, int edge_max, int 
                 << " " << !(*end_node).backward << " offset " << end_pos << endl;
             }
 #endif
-            KmerPosition& reverse_kmer = cache[cache_key];
+            // We need to initialize this KmerPosition and its lock if we're the
+            // first one here.
+            bool init_lock = !cache.count(cache_key);
+            auto& lock_and_position = cache[cache_key];
+            if(init_lock) {
+                // Make the lock.
+                omp_init_lock(&lock_and_position.first);
+            }
+            // Get the fine-grained lock
+            omp_set_lock(&lock_and_position.first);
+            KmerPosition& reverse_kmer = lock_and_position.second;
+            // Unlock the cache. We can keep working on this kmer, because
+            // nobody else can get it.
+            // TODO: one person waiting on it can block everyone else waiting on other kmers...
+            omp_unset_lock(&cache_lock);
 
             // fix up the context by swapping reverse-complements of the head and tail node
             // with their forward versions
@@ -5633,6 +5691,8 @@ void VG::gcsa_handle_node_in_graph(Node* node, int kmer_size, int edge_max, int 
                 ps << target_node << ":" << (!target_node_backward?"-":"") << off;
                 reverse_kmer.next_positions.insert(ps.str());
             }
+            
+            omp_unset_lock(&lock_and_position.first);
         }
     };
         
@@ -5642,10 +5702,15 @@ void VG::gcsa_handle_node_in_graph(Node* node, int kmer_size, int edge_max, int 
     // produce the same kmer, since GCSA2 needs those.
     for_each_kmer_of_node(node, kmer_size, edge_max, visit_kmer, stride, true, false);
         
+    // Get rid of the lock on the cache
+    omp_destroy_lock(&cache_lock);
+        
     // Now that the cache is full and correct, containing each kmer starting
     // on either strand of this node, send out all its entries.
     for(auto& kv : cache) {
-        lambda(kv.second);
+        // Clean up the lock
+        omp_destroy_lock(&kv.second.first);
+        lambda(kv.second.second);
     }
         
 }
