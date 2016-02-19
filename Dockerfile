@@ -12,10 +12,12 @@ COPY Makefile /app/Makefile
 
 # Install vg dependencies and clear the package index
 RUN \
+    echo "deb http://archive.ubuntu.com/ubuntu trusty-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y \
         build-essential \
         pkg-config \
+        jq/trusty-backports \
         sudo && \
     make get-deps && \
     rm -rf /var/lib/apt/lists/*
