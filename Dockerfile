@@ -24,7 +24,7 @@ RUN \
 COPY . /app
     
 # Build vg
-RUN make -j8
+RUN . ./source_me.sh && make -j8
 
 # Make tests. We can't do it in parallel since it cleans up the test binary
 RUN make test
