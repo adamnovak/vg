@@ -2,6 +2,7 @@
 #include <fstream>
 #include <ctime>
 #include <cstdio>
+#include <csignal>
 #include <getopt.h>
 #include "gcsa.h"
 // From gcsa2
@@ -5368,6 +5369,16 @@ void vg_help(char** argv) {
 
 int main(int argc, char *argv[])
 {
+
+    // Set up stack trace support
+    signal(SIGSEGV, [](int signalNumber) {
+        emit_stacktrace();
+    });
+    // We don't set_terminate because we still want the standard library's
+    // message about what the exception was.
+    signal(SIGABRT, [](int signalNumber) {
+        emit_stacktrace();
+    });
 
     if (argc == 1) {
         vg_help(argv);

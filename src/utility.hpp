@@ -31,6 +31,12 @@ void mapping_cigar(const Mapping& mapping, vector<pair<int, char> >& cigar);
 string cigar_string(vector<pair<int, char> >& cigar);
 string mapping_string(const string& source, const Mapping& mapping);
 
+// Emit a stack trace when something bad happens.
+void emit_stacktrace();
+
+// This is an internal function used by the above.
+string demangle_frame(string mangled);
+
 template<typename T, typename V>
 set<T> map_keys_to_set(const map<T, V>& m) {
     set<T> r;

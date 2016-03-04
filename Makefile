@@ -9,13 +9,13 @@ CPP_DIR:=cpp
 EXE:=vg
 
 CXX:=g++
-CXXFLAGS:=-O3 -msse4.1 -fopenmp -std=c++11 -ggdb
+CXXFLAGS:=-O3 -msse4.1 -fopenmp -std=c++11 -g
 
 CWD:=$(shell pwd)
 
 
 LD_INCLUDE_FLAGS:=-I$(CWD)/$(INC_DIR) -I. -I$(CWD)/$(SRC_DIR) -I$(CWD)/$(CPP_DIR)
-LD_LIB_FLAGS:= -ggdb -L$(CWD)/$(LIB_DIR) -lvcflib -lgssw -lprotobuf -lhts -lpthread -ljansson -lncurses -lrocksdb -lsnappy -lz -lbz2 -lgcsa2 -lxg -lsdsl -ldivsufsort -ldivsufsort64 -lvcfh -lgfakluge -lraptor2
+LD_LIB_FLAGS:= -g -rdynamic -L$(CWD)/$(LIB_DIR) -lvcflib -lgssw -lprotobuf -lhts -lpthread -ljansson -lncurses -lrocksdb -lsnappy -lz -lbz2 -lgcsa2 -lxg -lsdsl -ldivsufsort -ldivsufsort64 -lvcfh -lgfakluge -lraptor2
 
 RAPTOR_INCLUDE:=/usr/include/
 ifeq ($(shell uname -s),Darwin)
