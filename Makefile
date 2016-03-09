@@ -15,7 +15,7 @@ CWD:=$(shell pwd)
 
 
 LD_INCLUDE_FLAGS:=-I$(CWD)/$(INC_DIR) -I. -I$(CWD)/$(SRC_DIR) -I$(CWD)/$(CPP_DIR)
-LD_LIB_FLAGS:= -g -rdynamic -L$(CWD)/$(LIB_DIR) -lvcflib -lgssw -lprotobuf -lhts -lpthread -ljansson -lncurses -lrocksdb -lsnappy -lz -lbz2 -lgcsa2 -lxg -lsdsl -ldivsufsort -ldivsufsort64 -lvcfh -lgfakluge -lraptor2
+LD_LIB_FLAGS:= -g -L$(CWD)/$(LIB_DIR) -lvcflib -lgssw -lprotobuf -lhts -lpthread -ljansson -lncurses -lrocksdb -lsnappy -lz -lbz2 -lgcsa2 -lxg -lsdsl -ldivsufsort -ldivsufsort64 -lvcfh -lgfakluge -lraptor2
 
 RAPTOR_INCLUDE:=/usr/include/
 ifeq ($(shell uname -s),Darwin)
@@ -33,6 +33,8 @@ ifeq ($(shell uname -s),Darwin)
 else
     # Not on OS X, we can have librt
     LD_LIB_FLAGS += -lrt
+    # We can also copy debug info from dynamically linked libraries, for backtrace
+    LD_LIB_FLAGS += -rdynamic
 endif
 
 STATIC_FLAGS=-static -static-libstdc++ -static-libgcc
