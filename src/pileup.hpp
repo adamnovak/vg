@@ -240,10 +240,16 @@ public:
                             int64_t to_id, int64_t to_offset, bool to_end);
         
     static void parse_insert(const string& tok, int64_t& len, string& seq, bool& is_reverse);
+    // Parse a deletion given in tok, which consists of a string like
+    // "-0;4866;17;0;4866;20;0" containing a leading '-' and seven semicolon-
+    // separated fields. Extracts the from node, offset, and base side, and to
+    // node, offset, and base side, and also a flag denoting if the read
+    // suggesting the deletion is on the reverse strand or not. Deletions are
+    // canonically encoded smaller side first.
     static void parse_delete(const string& tok, bool& is_reverse,
                              int64_t& from_id, int64_t& from_offset, bool& from_start,
                              int64_t& to_id, int64_t& to_offset, bool& to_end);
-
+                             
     static bool base_equal(char c1, char c2, bool is_reverse);
     
     // get a pileup value on forward strand
@@ -251,6 +257,15 @@ public:
 
     // get arbitrary value from offset on forward strand
     static string extract(const BasePileup& bp, int64_t offset);
+    
+    // Parse the "bases" field of a BasePileup and yield (through lambdas) the
+    // different pileup operations that occur at the base. Matches and
+    // mismatches are routed to handle_base, insertions are routed to
+    // handle_insertion, and deletions are routed to handle_deletion.
+    static void for_each_operation(const BasePileup& pileup,
+        const function<void(const PileupBase&)>& handle_base,
+        const function<void(const PileupInsertion&)>& handle_insertion,
+        const function<void(const PileupDeletion&)>& handle_deletion);
 };
 
 

@@ -125,6 +125,52 @@ message KmerMatch {
     bool backward = 4; 
 }
 
+// Represents an observation of a match or a mismatch in a pileup. Encoded as a
+// single character within the "bases" field of a BasePileup: . or , for matches
+// on the forward and reverse strands, and ACGTN or acgtn (reverse complemented)
+// for mismatches on the forward and reverse strands.
+message PileupBase {
+    // Sequence is always given as upper-case in Protobuf. If this is really a
+    // match, sequence will be empty (and not "." or ",").
+    string sequence = 1;
+    bool is_reverse = 2;
+}
+
+// Represents an observation of an insertion in a pileup. Encoded as a run of
+// characters within the "bases" field of a BasePileup: a leading '+', followed
+// by the inserted length in digits, then the inserted sequence in upper-case
+// for the forward strand or lower-case (and reverse-complemented) for the
+// reverse strand.
+//
+message PileupInsertion {
+    // Sequence always given as upper-case in ProtoBuf
+    string sequence = 1;
+    bool is_reverse = 2;
+}
+
+// Represents an observation of a deletion in a pileup. Encoded as a run of
+// characters within the "bases" field of a BasePileup: a leading '-', followed
+// by seven semicolon-separated fields:
+// is_reverse (0 for forward strand, 1 for reverse);
+// id of node deletion starts on;
+// offset on node for the base the deletion edge attaches to;
+// from_start (0 for right side of base, 1 for left side);
+// id of node the deletion ends on;
+// offset on node for the base the deletion edge attaches to;
+// to_end (0 for left side of base, 1 for right side)
+message PileupDeletion {
+    // We skip 1 and start at 2 so that we might eventually be able to combine
+    // these pileup records in a sane way into a generic (tagged?) record.
+    bool is_reverse = 2;
+    int64 from = 3;
+    int64 to = 4;
+    int64 from_offset = 5;
+    int64 to_offset = 6;
+    bool from_start = 7;
+    bool to_end = 8;
+    
+}
+
 // Summarizes reads that map to single position in the graph.
 // This structure is pretty much identical to a line in Samtools pileup format
 // if qualities set, it must have size = num_bases

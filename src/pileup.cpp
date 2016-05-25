@@ -784,4 +784,145 @@ string Pileups::extract(const BasePileup& bp, int64_t offset) {
     }
 }
 
+void Pileups::for_each_operation(const BasePileup& pileup,
+    const function<void(const PileupBase&)>& handle_base,
+    const function<void(const PileupInsertion&)>& handle_insertion,
+    const function<void(const PileupDeletion&)>& handle_deletion) {
+
+    // Keep a cursor
+    size_t cursor = 0;
+    
+    // Grab the string to parse
+    const string& bases = pileup.bases();
+
+    while(cursor < bases.size()) {
+        // We duplicate a lot of extract because we need to know if we're on the
+        // referse strand or not.
+        
+        if (bases[cursor] == '+') {
+            // We have an insert!
+            
+            PileupInsertion parsed;
+            
+            // Consume the '+'
+            cursor++;
+            
+            // Pull out the length digits. Make sure not to do any dumb out of
+            // bounds access that would let a corrupt string wander off into
+            // memory.
+            string len_str;
+            while(bases.at(cursor) >= '0' && bases.at(cursor) <= '9') {
+                len_str += bases.at(cursor);
+                cursor++;
+            }
+            int64_t len = atoi(len_str.c_str());
+            
+            if(cursor + len > bases.size()) {
+                // Don't let an invalid length into a substr call.
+                throw runtime_error("Invalid insertion length in pileup " + bases);
+            }
+            
+            
+            // Pull out the inserted sequence
+            string dna = bases.substr(cursor, len);
+            cursor += len;
+            
+            if (::islower(bases.at(cursor))) {
+                // Reverse strand. Currently upper-case and backward. Make it
+                // lower-case and forward.
+                casify(dna, false);
+                dna = reverse_complement(dna);
+                
+                // Remember this fact
+                parsed.set_is_reverse(true);
+            }
+            
+            // Stick in the DNA
+            parsed.set_sequence(dna);
+            
+            // Dispatch
+            handle_insertion(parsed);
+        } else if(bases[cursor] == '-') {
+            // Handle a deletion
+            PileupDeletion parsed;
+            
+            // Consume the '-'
+            cursor++;
+            
+            // Count 6 semicolons and go one character further
+            int64_t semicolons = 0;
+            // This will be the length of the deletion specification
+            int64_t length = 0;
+            for (; semicolons < 6; ++length) {
+                if (bases.at(cursor + length) == ';') {
+                    ++semicolons;
+                }
+            }
+            // Now take one character after the last semicolon (the to_end flag)
+            length++;
+            
+            if(cursor + length > bases.size()) {
+                // Don't let an invalid length into a substr call.
+                throw runtime_error("Invalid deletion in pileup " + bases);
+            }
+
+            // Cut out the string that we want            
+            string deletion_spec = bases.substr(cursor, length);
+            cursor += length;
+            
+            // Tokenize on semicolons
+            vector<string> toks;
+            regex sc_re(";");
+            std::copy(sregex_token_iterator(deletion_spec.begin(), deletion_spec.end(), sc_re, -1),
+                      sregex_token_iterator(), back_inserter(toks));
+
+            // Parse and assign all the individual fields
+            assert(toks.size() == 7);
+            parsed.set_is_reverse(std::stoi(toks.at(0)) != 0);
+
+            parsed.set_from(std::stoi(toks.at(1)));
+            parsed.set_from_offset(std::stoi(toks.at(2)));
+            parsed.set_from_start(std::stoi(toks.at(3)) != 0);
+            
+            parsed.set_to(std::stoi(toks.at(4)));
+            parsed.set_to_offset(std::stoi(toks.at(5)));
+            parsed.set_to_end(std::stoi(toks.at(6)) != 0);
+            
+            // Dispatch
+            handle_deletion(parsed);
+            
+        } else {
+            // Handle a match/mismatch
+            PileupBase parsed;
+        
+            // Grab the single-character base
+            auto base = bases.substr(cursor, 1);
+            cursor++;
+            
+            if(base == ",") {
+                parsed.set_is_reverse(true);
+                // No sequence
+            } else if(base != ".") {
+                // It's not a forward strand match (for which we do nothing)
+                if(::islower(base.at(0))) {
+                    // It's on the reverse strand. Fix it up and remember that.
+                    base.at(0) = ::toupper(base.at(0));
+                    base = reverse_complement(base);
+                    parsed.set_is_reverse(true);
+                }
+                
+                // Save the (now forward and upper-case) base
+                parsed.set_sequence(base);
+            }
+        
+            // Otherwise it's a ".", and the default PileupBase is a reference
+            // observation on the forward strand, so there's nothing to do to
+            // it.
+            
+            // Dispatch the observation
+            handle_base(parsed);
+        }
+    }
+}
+
 }
