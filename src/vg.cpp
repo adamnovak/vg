@@ -38,6 +38,8 @@ VG::VG(istream& in, bool showp) {
 
     // store paths in graph
     paths.to_graph(graph);
+    
+    cerr << pb2json(graph) << endl;
 
     destroy_progress();
 
@@ -56,6 +58,8 @@ VG::VG(function<bool(Graph&)>& get_next_graph, bool showp) {
     Graph subgraph;
     bool got_subgraph = get_next_graph(subgraph);
     while(got_subgraph) {
+        cerr << pb2json(subgraph) << endl;
+    
         // If there is a valid subgraph, add it to ourselves.
         // We expect these to not overlap in nodes or edges, so complain if they do.
         extend(subgraph, true);
@@ -65,6 +69,8 @@ VG::VG(function<bool(Graph&)>& get_next_graph, bool showp) {
 
     // store paths in graph
     paths.to_graph(graph);
+    
+    cerr << pb2json(graph) << endl;
 }
 
 void VG::clear_paths(void) {
@@ -122,6 +128,18 @@ void VG::serialize_to_ostream(ostream& out, id_t chunk_size) {
             for (auto& m : path) {
                 g.paths.append_mapping(name, *m.second);
             }
+        }
+
+        if (i == 0) {
+            // The first chunk will always include all the 0-length paths.
+            // TODO: if there are too many, this chunk may grow too large!
+            paths.for_each_name([&](const string& name) {
+                // For every path
+                if (paths.get_path(name).empty()) {
+                    // If its mapping list has no mappings, make it in the chunk
+                    g.paths.create_path(name);
+                }
+            });
         }
 
         // record our circular paths
@@ -5258,11 +5276,6 @@ bool VG::is_valid(bool check_nodes,
             [this, &paths_ok]
             (const Path& path) {
             if (!paths_ok) {
-                return;
-            }
-            if (!path.mapping_size()) {
-                cerr << "graph invalid: path " << path.name() << " has no component mappings" << endl;
-                paths_ok = false;
                 return;
             }
             if (path.mapping_size() == 1) {
