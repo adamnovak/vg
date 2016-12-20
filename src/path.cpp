@@ -1336,18 +1336,39 @@ const string mapping_sequence(const Mapping& mp, const string& node_seq) {
     size_t f = m.position().offset();
     for (size_t i = 0; i < m.edit_size(); ++i) {
         auto& e = m.edit(i);
+        
+        string to_add;
+        
         if (edit_is_match(e)) {
-            seq.append(node_seq.substr(f, e.from_length()));
+            cerr << "Grab " << e.from_length() << " at " << f << " in " << node_seq.size() << endl; 
+            to_add = node_seq.substr(f, e.from_length());
+            if (to_add.size() != e.from_length()) {
+                cerr << "Bad mapping has gone off end of node!" << endl;
+                cerr << "Mapping: " << pb2json(mp) << endl;
+                cerr << "Node sequence: " << node_seq << endl;
+                assert(false);
+            }
         } else if (edit_is_sub(e)) {
-            seq.append(e.sequence());
+            to_add = e.sequence();
         } else if (edit_is_insertion(e)) {
-            seq.append(e.sequence());
+            to_add = e.sequence();
         } else if (edit_is_deletion(e)) {
             // no-op
+        } else {
+            cerr << "Unrecognized edit " << cerr << pb2json(e) << endl;
+            assert(false);
         }
+        seq.append(to_add);
         t += e.to_length();
+        cerr << pb2json(e) << endl;
+        cerr << "Add " << to_add << " length " << to_add.size() << " for edit of to_length "
+            << e.to_length() << " for total " << t << " vs " << seq.size() << endl;
+        assert(seq.size() == t);
         f += e.from_length();
     }
+    
+    assert(seq.size() == t);
+    
     // TODO: we must resolve these semantics
     // probably we shouldn't have perfect matches be represented this way
     // it is better to be explicit

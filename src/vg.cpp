@@ -4344,6 +4344,10 @@ string VG::path_string(const Path& path) {
         Node* n = node_by_id[m.position().node_id()];
         seq.append(mapping_sequence(m, *n));
     }
+    
+    cerr << "Extracted " << seq.size() << " bp from path of " << path_to_length(path) << " bp" << endl;
+    assert(seq.size() == path_to_length(path));
+    
     return seq;
 }
 

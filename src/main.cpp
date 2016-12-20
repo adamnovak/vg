@@ -2104,6 +2104,11 @@ int main_msga(int argc, char** argv) {
         if (base_seq_name.empty()) {
             base_seq_name = names_in_order.front();
         }
+        
+        if (debug) {
+            cerr << "Starting graph with sequence " << base_seq_name << endl;
+        }
+        
         // we specified one we wanted to use as the first
         build_graph(strings[base_seq_name], base_seq_name);
     }
@@ -2209,13 +2214,32 @@ int main_msga(int argc, char** argv) {
             // align to the graph
             if (debug) cerr << name << ": aligning sequence of " << seq.size() << "bp against " <<
                 graph->node_count() << " nodes" << endl;
-            Alignment aln = simplify(mapper->align(seq, 0, sens_step, max_mem_length, band_width));
+            Alignment complex = mapper->align(seq, 0, sens_step, max_mem_length, band_width);
+            Alignment aln = simplify(complex);
+            assert(complex.sequence().size() == aln.sequence().size());
+            assert(path_to_length(complex.path()) == path_to_length(aln.path()));
             if (aln.path().mapping_size()) {
                 auto aln_seq = graph->path_string(aln.path());
                 if (aln_seq != seq) {
-                    cerr << "[vg msga] alignment corrupted, failed to obtain correct banded alignment (alignment seq != input seq)" << endl;
-                    cerr << "expected " << seq << endl;
-                    cerr << "got      " << aln_seq << endl;
+                    cerr << "[vg msga] alignment of " << name << " corrupted, failed to obtain correct banded alignment (alignment seq != input seq)" << endl;
+                    
+                    if (aln_seq.size() != seq.size()) {
+                        // Report size difference
+                        cerr << "Aligned sequence is " << aln_seq.size()
+                            << " bp while original is " << seq.size() << " bp" << endl;
+                    } else if (aln_seq.size() > 0) {
+                        // Report the location and sequence of the first difference
+                        auto difference_positions = std::mismatch(aln_seq.begin(), aln_seq.end(), seq.begin());
+                        size_t difference_offset = (&(*difference_positions.first) - &aln_seq[0]);
+                        cerr << "Sequences differ at base " << difference_offset << endl;
+                        
+                        cerr << "expected " << seq.substr(min(difference_offset, seq.size()), 100) << endl;
+                        cerr << "got      " << aln_seq.substr(min(difference_offset, aln_seq.size()), 100) << endl;
+                    } else {
+                        // Report the entire sequences
+                        cerr << "expected " << seq << endl;
+                        cerr << "got      " << aln_seq << endl;
+                    }
                     ofstream f(name + "-failed-alignment-" + convert(j) + ".gam");
                     stream::write(f, 1, (std::function<Alignment(uint64_t)>)([&aln](uint64_t n) { return aln; }));
                     f.close();

@@ -802,6 +802,10 @@ Alignment merge_alignments(const vector<Alignment>& alns, bool debug) {
         return alns.front();
     }
 
+    // How many bases are traced by input alignments?
+    size_t total_traced = 0;
+    size_t total_seq = 0;
+
     // execute a serial merge
     // buliding up the alignment
     Alignment merged;
@@ -816,6 +820,10 @@ Alignment merge_alignments(const vector<Alignment>& alns, bool debug) {
             e->set_sequence(aln.sequence());
             *aln.mutable_path()->add_mapping() = m;
         }
+        
+        total_traced += path_to_length(aln.path());
+        total_seq += aln.sequence().size();
+        
         if (i == 0) {
             merged = aln;
         } else {
@@ -823,6 +831,15 @@ Alignment merge_alignments(const vector<Alignment>& alns, bool debug) {
         }
     }
     *merged.mutable_path() = simplify(merged.path());
+    
+    cerr << "Merged " << alns.size() << " alignments tracing " << total_traced
+        << " bp with " << total_seq << " bp of sequence into " << path_to_length(merged.path())
+        << " bp traced with " << merged.sequence().size() << " bp sequence" << endl;
+        
+    assert(total_seq == total_traced);
+    assert(total_seq == merged.sequence().size());
+    assert(merged.sequence().size() == path_to_length(merged.path()));
+    
     return merged;
 }
 

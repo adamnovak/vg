@@ -1289,8 +1289,11 @@ Alignment Mapper::align_banded(const Alignment& read, int kmer_size, int stride,
     }
     // and overlap them too
     size_t to_align = div * 2 - 1; // number of alignments we'll do
-    vector<pair<size_t, size_t>> to_strip; to_strip.resize(to_align);
     vector<Alignment> bands; bands.resize(to_align);
+    // We need to remember how much of each band we will actually take
+    vector<size_t> responsibilities; responsibilities.resize(to_align);
+    // And how much we will strip off each end
+    vector<pair<size_t, size_t>> to_strip; to_strip.resize(to_align);
 
     // scan across the read choosing bands
     // these bands are hard coded to overlap by 50%
@@ -1328,6 +1331,10 @@ Alignment Mapper::align_banded(const Alignment& read, int kmer_size, int stride,
         size_t idx = 2*i;
         to_strip[idx].first = (i == 0 ? 0 : segment_size/4 + addl_seq);
         to_strip[idx].second = (i+1 == div ? 0 : segment_size/4);
+        
+        // How much sequence will we really be responsible for?
+        responsibilities[idx] = aln.sequence().size() - to_strip[idx].first - to_strip[idx].second;
+        
         bands[idx] = aln;
         if (i != div-1) { // if we're not at the last sequence
             aln.set_sequence(read.sequence().substr(off+segment_size/2,
@@ -1337,7 +1344,13 @@ Alignment Mapper::align_banded(const Alignment& read, int kmer_size, int stride,
             // record second but take account of case where we run off end
             to_strip[idx].second = segment_size/4 - (segment_size - aln.sequence().size());
             bands[idx] = aln;
+            responsibilities[idx] = aln.sequence().size() - to_strip[idx].first - to_strip[idx].second;
         }
+    }
+    
+    cerr << "Responsibilities: " << endl;
+    for (size_t i = 0; i < responsibilities.size(); i++) {
+        cerr << "\t" << i << ": " << responsibilities[i] << endl;
     }
 
     vector<vector<Alignment>> multi_alns;
@@ -1353,6 +1366,7 @@ Alignment Mapper::align_banded(const Alignment& read, int kmer_size, int stride,
             malns.push_back(bands[i]);
             for (vector<Alignment>::iterator a = malns.begin(); a != malns.end(); ++a) {
                 Alignment& aln = *a;
+                assert(aln.sequence() == bands[i].sequence());
                 bool above_threshold = aln.identity() >= min_identity;
                 if (!above_threshold) {
                     // treat as unmapped
@@ -1361,10 +1375,13 @@ Alignment Mapper::align_banded(const Alignment& read, int kmer_size, int stride,
                 // strip overlaps
                 aln = strip_from_start(aln, to_strip[i].first);
                 aln = strip_from_end(aln, to_strip[i].second);
+                // Make sure we end up with the right number of non-overlapped bases.
+                assert(aln.sequence().size() == responsibilities[i]);
             }
         } else {
             Alignment& aln = alns[i];
             aln = align(bands[i], kmer_size, stride, max_mem_length, band_width);
+            assert(aln.sequence() == bands[i].sequence());
             bool above_threshold = aln.identity() >= min_identity;
             if (!above_threshold) {
                 aln = bands[i]; // unmapped
@@ -1374,14 +1391,32 @@ Alignment Mapper::align_banded(const Alignment& read, int kmer_size, int stride,
                 cerr << "Unstripped alignment: " << pb2json(aln) << endl;
             }
             
+            Alignment original = aln;
+            
             // strip overlaps
-            //cerr << "checking before strip" << endl;
-            //check_alignment(aln);
+            cerr << "checking before strip" << endl;
+            cerr << pb2json(aln) << endl;
+            check_alignment(aln);
             aln = strip_from_start(aln, to_strip[i].first);
             aln = strip_from_end(aln, to_strip[i].second);
-            //cerr << "checking after strip" << endl;
-            //check_alignment(aln);
-            //cerr << "OK" << endl;
+            cerr << "checking after strip" << endl;
+            check_alignment(aln);
+            cerr << "OK" << endl;
+            
+            // How many bases does the path trace?
+            size_t path_traces = path_to_length(aln.path());
+            if (aln.sequence().size() != responsibilities[i] || path_traces != responsibilities[i]) {
+                cerr << "[mapper] error: band " << i << " of " << bands.size()
+                    << " should be length " << responsibilities[i]
+                    << " after trimming " << to_strip[i].first << " from start and "
+                    << to_strip[i].second << " from end but is instead length "
+                    << aln.sequence().size() << " and traces " << path_traces << " bp" << endl;
+                cerr << "Trimmed: " << pb2json(aln) << endl;
+                cerr << "Untrimmed: " << pb2json(original) << endl;
+            }
+            
+            // Make sure we end up with the right number of non-overlapped bases.
+            assert(aln.sequence().size() == responsibilities[i]);
         }
     };
     
@@ -1415,7 +1450,7 @@ Alignment Mapper::align_banded(const Alignment& read, int kmer_size, int stride,
     merged.set_score(score_alignment(merged));
     merged.set_quality(read.quality());
     merged.set_name(read.name());
-
+    
     if(debug) {
         for(int i = 0; i < merged.path().mapping_size(); i++) {
             // Check each Mapping to make sure it doesn't go past the end of its
@@ -1433,6 +1468,11 @@ Alignment Mapper::align_banded(const Alignment& read, int kmer_size, int stride,
             }
         }
     }
+    
+    cerr << "align_banded merged alignment of size " << merged.sequence().size()
+        << " tracing " << path_to_length(merged.path())
+        << " from input of size " << read.sequence().size() << endl;
+    assert(merged.sequence() == read.sequence());
 
     return merged;
 }
@@ -1709,12 +1749,18 @@ vector<Alignment> Mapper::align_multi_internal(bool compute_unpaired_quality, co
             << endl;
     }
     
+    cerr << "align_multi_internal " << aln.sequence().size() << " bases" << endl;
+    
     // trigger a banded alignment if we need to
     // note that this will in turn call align_multi_internal on fragments of the read
     if (aln.sequence().size() > band_width) {
         // TODO: banded alignment currently doesn't support mapping qualities because it only produces one alignment
         if (debug) cerr << "switching to banded alignment" << endl;
-        return vector<Alignment>{align_banded(aln, kmer_size, stride, max_mem_length, band_width)};
+        
+        auto aligned = align_banded(aln, kmer_size, stride, max_mem_length, band_width);
+        cerr << "align_multi_internal aligned " << aligned.sequence().size()
+            << " bases which should be " << path_to_length(aligned.path()) << " bases" << endl;
+        return vector<Alignment>{aligned};
     }
     
     // try to get at least 2 multimaps so that we can calculate mapping quality
@@ -1760,6 +1806,8 @@ vector<Alignment> Mapper::align_multi_internal(bool compute_unpaired_quality, co
     
     filter_and_process_multimaps(alignments, additional_multimaps);
     
+    cerr << "align_multi_internal aligned " << alignments[0].sequence().size()
+            << " bases which should be " << path_to_length(alignments[0].path()) << " bases" << endl;
     return alignments;
 }
 
@@ -1882,6 +1930,8 @@ vector<Alignment> Mapper::align_multi_kmers(const Alignment& aln, int kmer_size,
 Alignment Mapper::align(const Alignment& aln, int kmer_size, int stride, int max_mem_length, int band_width) {
     // TODO computing mapping quality could be inefficient depending on the method chosen
     
+    cerr << "Align " << aln.sequence().size() << " bases" << endl;
+    
     // Do the multi-mapping
     vector<Alignment> best = align_multi(aln, kmer_size, stride, max_mem_length, band_width);
 
@@ -1890,10 +1940,12 @@ Alignment Mapper::align(const Alignment& aln, int kmer_size, int stride, int max
         Alignment failed = aln;
         failed.clear_path();
         failed.set_score(0);
+        cerr << "Aligned " << failed.sequence().size() << " bases" << endl;
         return failed;
     }
 
     // Otherwise, just report the best alignment, since we know one exists
+    cerr << "Aligned " << best[0].sequence().size() << " bases" << endl;
     return best[0];
 }
 
