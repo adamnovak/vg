@@ -9,28 +9,52 @@ GraphSynchronizer::GraphSynchronizer(VG& graph) : graph(graph) {
 }
 
 const string& GraphSynchronizer::get_path_sequence(const string& path_name) {
-    // Lock the whole graph
-    std::lock_guard<std::mutex> guard(whole_graph_lock);
-    
-    // Get (and possibly generate from the graph) the index, and return its
-    // sequence string (which won't change)
+    ting::shared_lock<ting::shared_mutex> guard(whole_graph_mutex);
+    cerr << "Getting path for " << path_name << endl;
     return get_path_index(path_name).sequence;
+    
+    /*return with_path_index<const string&>(path_name, [](const PathIndex& index) {
+        return index.sequence;
+    });*/
 }
 
     
 // We need a function to grab the index for a path
 PathIndex& GraphSynchronizer::get_path_index(const string& path_name) {
+    // Caller has a read lock on the graph.
 
-    if (!indexes.count(path_name)) {
-        // Not already made. Generate it.
-        indexes.emplace(piecewise_construct,
-            forward_as_tuple(path_name), // Make the key
-            forward_as_tuple(graph, path_name, true)); // Make the PathIndex
+    {
+        // Get a read lock on the indexes map.
+        ting::shared_lock<ting::shared_mutex> indexes_lock(indexes_mutex);
+        
+        if (indexes.count(path_name)) {
+            // If we find it, return it
+            indexes.at(path_name);
+        }
+    
     }
-    return indexes.at(path_name);
+    
+    // Otherwise, it wasn't there when we grabbed the read lock. Try again with a write lock
+    {
+        std::unique_lock<ting::shared_mutex> indexes_lock(indexes_mutex);
+        
+        if (!indexes.count(path_name)) {
+            // Still not already made. Generate it.
+            indexes.emplace(piecewise_construct,
+                forward_as_tuple(path_name), // Make the key
+                forward_as_tuple(graph, path_name, true)); // Make the PathIndex
+        }
+        return indexes.at(path_name);
+        
+    }
 }
 
 void GraphSynchronizer::update_path_indexes(const vector<Translation>& translations) {
+    // Caller already has a writer lock on the graph, so we just need a read
+    // lock on the indexes map. This still lets us write to the individual
+    // indexes.
+    ting::shared_lock<ting::shared_mutex> indexes_lock(indexes_mutex);
+    
     for (auto& kv : indexes) {
         // We need to touch every index (IN PLACE!)
         
@@ -56,15 +80,31 @@ void GraphSynchronizer::Lock::lock() {
         return;
     }
     
-    // What we do is, we lock the graph and wait on the condition variable, with
-    // the check code being that we find the subgraph and immediate neighbors
-    // and verify none of its nodes are locked
+    // What we do is, we lock the locked_nodes set and wait on the condition
+    // variable, with the check code being that we read-lock the whole graph,
+    // find the subgraph and immediate neighbors and verify none of its nodes
+    // are locked, all while holding the read lock. On success, we keep the read
+    // lock, while if any nodes conflict we drop the read lock.
     
-    // Lock the whole graph
-    std::unique_lock<std::mutex> lk(synchronizer.whole_graph_lock);
-    synchronizer.wait_for_region.wait(lk, [&]{
+    // Lock the locked nodes set.
+    std::unique_lock<std::mutex> locked_nodes_lock(synchronizer.locked_nodes_mutex);
+    
+    // Allocate a reader lock for the whole graph, but don't lock it yet. We
+    // might need to wait for someone who has one of our nodes to get a write
+    // lock on the graph before we can have the node.
+    ting::shared_lock<ting::shared_mutex> whole_graph_lock;
+    
+    // TODO: what we really want is for all the threads to be able to search at
+    // once, with just graph read locks, and then come back and lock the node
+    // set and see if they can get exclusive ownership of their nodes. But that
+    // needs some kind of shared lock supporting condition variable.
+    
+    synchronizer.wait_for_region.wait(locked_nodes_lock, [&]{
         // Now we have exclusive use of the graph and indexes, and we need to
         // see if anyone else is using any nodes we need.
+        
+        // Get a read lock on the graph
+        ting::shared_lock<ting::shared_mutex> local_whole_graph_lock(synchronizer.whole_graph_mutex);
         
         // Find the center node, at the position we want to lock out from
         NodeSide center = synchronizer.get_path_index(path_name).at_position(path_offset);
@@ -124,15 +164,19 @@ void GraphSynchronizer::Lock::lock() {
         if (nodes_available) {
             // We can have the nodes we need. Remember what they are.
             subgraph = std::move(context);
+            
+            // Hold onto our read lock on the graph after we return
+            whole_graph_lock = std::move(local_whole_graph_lock);
         }
         
         // Return whether we were successful
         return nodes_available;
     });
 
-    // Once we get here, we have a lock on the whole graph, and nobody else has
-    // claimed our nodes. Our graph and periphery have been filled in, so we
-    // just have to record our nodes as locked.
+    // Once we get here, we have a read lock on the whole graph, an exclusive
+    // lock on the locked nodes set, and nobody else has claimed our nodes. Our
+    // graph and periphery have been filled in, so we just have to record our
+    // nodes as locked.
     
     for(id_t id : periphery) {
         // Mark the periphery
@@ -147,12 +191,14 @@ void GraphSynchronizer::Lock::lock() {
     });
     
     // Now we know nobody else can touch those nodes and we can safely release
-    // our lock on the main graph by letting it leave scope.
+    // our locks on the main graph and the locked nodes set by letting them
+    // leave scope.
 }
 
 void GraphSynchronizer::Lock::unlock() {
-    // Get the main graph lock
-    std::unique_lock<std::mutex> lk(synchronizer.whole_graph_lock);
+    // Get a mutex just on the locked node set. We know nobody is modifying
+    // these nodes in the graph, since we still represent a lock on them.
+    std::unique_lock<std::mutex> locked_nodes_lock(synchronizer.locked_nodes_mutex);
     
     // Release all the nodes
     for (id_t locked : locked_nodes) {
@@ -163,7 +209,7 @@ void GraphSynchronizer::Lock::unlock() {
     locked_nodes.clear();
     
     // Notify anyone waiting, so they can all check to see if now they can go.
-    lk.unlock();
+    locked_nodes_lock.unlock();
     synchronizer.wait_for_region.notify_all();
 }
 
@@ -178,8 +224,8 @@ VG& GraphSynchronizer::Lock::get_subgraph() {
 
 vector<Translation> GraphSynchronizer::Lock::apply_edit(const Path& path) {
     // Make sure we have exclusive ownership of the graph itself since we're
-    // going to be modifying its data structures.
-    std::lock_guard<std::mutex> guard(synchronizer.whole_graph_lock);
+    // going to be modifying its data structures. We need a write lock.
+    std::unique_lock<ting::shared_mutex> guard(synchronizer.whole_graph_mutex);
     
     for (size_t i = 0; i < path.mapping_size(); i++) {
         // Check each Mapping to make sure it's on a locked node

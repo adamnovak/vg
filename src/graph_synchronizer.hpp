@@ -8,6 +8,7 @@
 
 #include "vg.hpp"
 #include "path_index.hpp"
+#include "shared_mutex.hpp"
 
 #include <thread>
 #include <mutex>
@@ -43,6 +44,19 @@ public:
     const string& get_path_sequence(const string& path_name);
     
     /**
+     * We can actually let users run whatever function they want with an
+     * exclusive handle on a PathIndex, with the guarantee that the graph won't
+     * change while they're working.
+     */
+    template <typename T>
+    T with_path_index(const string& path_name, const function<T(const PathIndex&)>& to_run) {
+        // Get a reader lock on the graph
+        ting::shared_lock<ting::shared_mutex> guard(whole_graph_mutex);
+        return to_run(get_path_index(path_name));
+    }
+    
+    
+    /**
      * This represents a request to lock a particular context on a particular
      * GraphSynchronizer. It fulfils the BasicLockable concept requirements, so
      * you can wait on it with std::unique_lock.
@@ -61,11 +75,16 @@ public:
          * Block until a lock is obtained.
          */
         void lock();
+        // Locking is going to need a lock on locked_nodes_mutex and a reader
+        // lock on the graph. This will block simultaneous lock() and unlock()
+        // calls and simultaneous apply_edit() calls.
         
         /**
          * If a lock is held, unlock it.
          */
         void unlock();
+        // Unlocking is going to need a lock on locked_nodes_mutex. This will
+        // block simultaneous lock() and unlock() calls.
         
         /**
          * May only be called when locked. Grab the subgraph that was extracted
@@ -85,6 +104,8 @@ public:
          * Any new nodes created are created already locked.
          */
         vector<Translation> apply_edit(const Path& path);
+        // Applying an edit needs a writer lock on the graph. This will block
+        // simultaneous lock() calls and simultaneous apply_edit() calls
         
     protected:
     
@@ -113,13 +134,23 @@ protected:
     /// The graph we manage
     VG& graph;
     
-    /// We use this to lock the whole graph, for when we're exploring and trying
-    /// to lock a context, or for when we're making an edit, or for when we're
-    /// trying to lock a context, or for when we're working with the
-    /// PathIndexes. It's only ever held during functions in this class or
-    /// internal classes (monitor-style), so we don't need it to be a recursive
-    /// mutex.
-    mutex whole_graph_lock;
+    /// We use this to lock the whole graph.
+    /// When we're scanning the graph to build a PathIndex, we hold a read lock.
+    /// When we're modifying the graph, we hold a write lock.
+    /// When we're searching for nodes to lock, we hold a read lock.
+    ///
+    /// Only ever used by this class and internal classes (monitor-style), so we
+    /// don't need it to be a recursive mutex.
+    ting::shared_mutex whole_graph_mutex;
+    
+    /// We use this to protect the set of locked nodes, and the wait_for_region
+    /// condition variable. To lock or unlock nodes you need to be holding this
+    /// mutex. To lock nodes you also need to have a read lock on the
+    /// whole_graph_mutex, to ensure nobody is writing to the graph.
+    mutex locked_nodes_mutex;
+    
+    /// This holds all the node IDs that are currently locked by someone
+    set<id_t> locked_nodes;
     
     /// We have one condition variable where we have blocked all the threads
     /// that are waiting to lock subgraphs but couldn't the first time because
@@ -128,25 +159,31 @@ protected:
     /// they can have all their nodes this time.
     condition_variable wait_for_region;
     
+    /// This reader-writer lock protects the map below. You need a reader lock
+    /// to look up or use a PathIndex, and a writer lock to add a new PathIndex.
+    /// Note that you *also* need to hold a reader lock on the graph while doing
+    /// anything with path indexes, because the writer lock on the graph
+    /// controls updates to existing indexes.
+    ting::shared_mutex indexes_mutex;
+    
     /// We need indexes of all the paths that someone might want to use as a
     /// basis for locking. This holds a PathIndex for each path we touch by path
     /// name.
     map<string, PathIndex> indexes;
     
     /**
-     * Get the index for the given path name. Lock on the indexes and graph must
-     * be held already.
+     * Get the index for the given path name. Caller must hold a reader lock on
+     * the graph, and should not hold any lock on the idnexes.
      */
     PathIndex& get_path_index(const string& path_name);
     
     /**
-     * Update all the path indexes according to the given translations. Lock on
-     * the indexes and graph must be held already.
+     * Update all the path indexes according to the given translations. Caller
+     * must already hold a writer lock on the graph.
      */
     void update_path_indexes(const vector<Translation>& translations);
     
-    /// This holds all the node IDs that are currently locked by someone
-    set<id_t> locked_nodes;
+    
 
 
 };
