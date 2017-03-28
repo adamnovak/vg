@@ -34,6 +34,7 @@
 #include "readfilter.hpp"
 #include "distributions.hpp"
 #include "unittest/driver.hpp"
+#include "timer.hpp"
 // New subcommand system provides all the subcommands that used to live here
 #include "subcommand/subcommand.hpp"
 #include "flow_sort.hpp"
@@ -4776,6 +4777,8 @@ int main_map(int argc, char** argv) {
     int kmer_stride = 0;
     int pair_window = 64; // unused
     int mate_rescues = 64;
+    // How long do we give a read or pair to map before giving up on it?
+    chrono::milliseconds read_time_limit{10 * 1000};
 
     int c;
     optind = 2; // force optind past command positional argument
@@ -5237,7 +5240,10 @@ int main_map(int argc, char** argv) {
             unaligned.set_quality(qual);
         }
 
-        vector<Alignment> alignments = mapper[tid]->align_multi(unaligned, kmer_size, kmer_stride, max_mem_length, band_width);
+        vector<Alignment> alignments;
+        Timer::try_time(read_time_limit, [&]() {
+            alignments = mapper[tid]->align_multi(unaligned, kmer_size, kmer_stride, max_mem_length, band_width);
+        });
         if(alignments.size() == 0) {
             // If we didn't have any alignments, report the unaligned alignment
             alignments.push_back(unaligned);
@@ -5272,7 +5278,10 @@ int main_map(int argc, char** argv) {
                     Alignment unaligned;
                     unaligned.set_sequence(line);
 
-                    vector<Alignment> alignments = mapper[tid]->align_multi(unaligned, kmer_size, kmer_stride, max_mem_length, band_width);
+                    vector<Alignment> alignments;
+                    Timer::try_time(read_time_limit, [&]() {
+                        alignments = mapper[tid]->align_multi(unaligned, kmer_size, kmer_stride, max_mem_length, band_width);
+                    });
                     if(alignments.empty()) {
                         alignments.push_back(unaligned);
                     }
@@ -5299,7 +5308,8 @@ int main_map(int argc, char** argv) {
              &kmer_size,
              &kmer_stride,
              &max_mem_length,
-             &band_width]
+             &band_width,
+             &read_time_limit]
                 (Alignment& alignment) {
 
                     if(alignment.is_secondary() && !keep_secondary) {
@@ -5308,7 +5318,10 @@ int main_map(int argc, char** argv) {
                     }
 
                     int tid = omp_get_thread_num();
-                    vector<Alignment> alignments = mapper[tid]->align_multi(alignment, kmer_size, kmer_stride, max_mem_length, band_width);
+                    vector<Alignment> alignments;
+                    Timer::try_time(read_time_limit, [&]() {
+                        alignments = mapper[tid]->align_multi(alignment, kmer_size, kmer_stride, max_mem_length, band_width);
+                    });
                     if(alignments.empty()) {
                         alignments.push_back(alignment);
                     }
@@ -5328,6 +5341,13 @@ int main_map(int argc, char** argv) {
                 (Alignment& aln1,
                  Alignment& aln2,
                  pair<vector<Alignment>, vector<Alignment>>& alnp) {
+                 
+                // Make sure we have unaligned "alignments" for things that don't align.
+                if(alnp.first.empty() && alnp.second.empty()) {
+                    alnp.first.push_back(aln1);
+                    alnp.second.push_back(aln2);
+                }
+                 
                 // Output the alignments in JSON or protobuf as appropriate.
                 output_alignments(alnp.first);
                 output_alignments(alnp.second);
@@ -5342,10 +5362,18 @@ int main_map(int argc, char** argv) {
                  &band_width,
                  &pair_window,
                  &top_pairs_only,
-                 &output_func](Alignment& aln1, Alignment& aln2) {
+                 &output_func,
+                 &read_time_limit](Alignment& aln1, Alignment& aln2) {
                 auto our_mapper = mapper[omp_get_thread_num()];
                 bool queued_resolve_later = false;
-                auto alnp = our_mapper->align_paired_multi(aln1, aln2, queued_resolve_later, kmer_size, kmer_stride, max_mem_length, band_width, pair_window, top_pairs_only, false);
+                
+                // This holds our alignment pairs
+                pair<vector<Alignment>, vector<Alignment>> alnp;
+                Timer::try_time(read_time_limit, [&]() {
+                    alnp = our_mapper->align_paired_multi(aln1, aln2, queued_resolve_later, 
+                        kmer_size, kmer_stride, max_mem_length, band_width, pair_window, top_pairs_only, false);
+                });
+                
                 if (!queued_resolve_later) {
                     output_func(aln1, aln2, alnp);
                     // check if we should try to align the queued alignments
@@ -5353,11 +5381,14 @@ int main_map(int argc, char** argv) {
                         && !our_mapper->imperfect_pairs_to_retry.empty()) {
                         int i = 0;
                         for (auto p : our_mapper->imperfect_pairs_to_retry) {
-                            auto alnp = our_mapper->align_paired_multi(p.first, p.second,
-                                                                       queued_resolve_later, kmer_size,
-                                                                       kmer_stride, max_mem_length,
-                                                                       band_width, pair_window,
-                                                                       top_pairs_only, true);
+                            pair<vector<Alignment>, vector<Alignment>> alnp;
+                            Timer::try_time(read_time_limit, [&]() {
+                                alnp = our_mapper->align_paired_multi(p.first, p.second,
+                                                                      queued_resolve_later, kmer_size,
+                                                                      kmer_stride, max_mem_length,
+                                                                      band_width, pair_window,
+                                                                      top_pairs_only, true);
+                            });
                             output_func(p.first, p.second, alnp);
                         }
                         our_mapper->imperfect_pairs_to_retry.clear();
@@ -5372,11 +5403,14 @@ int main_map(int argc, char** argv) {
                 our_mapper->fragment_size = fragment_max;
                 for (auto p : our_mapper->imperfect_pairs_to_retry) {
                     bool queued_resolve_later = false;
-                    auto alnp = our_mapper->align_paired_multi(p.first, p.second,
-                                                               queued_resolve_later, kmer_size,
-                                                               kmer_stride, max_mem_length,
-                                                               band_width, pair_window,
-                                                               top_pairs_only, true);
+                    pair<vector<Alignment>, vector<Alignment>> alnp;
+                    Timer::try_time(read_time_limit, [&]() {
+                        alnp = our_mapper->align_paired_multi(p.first, p.second,
+                                                              queued_resolve_later, kmer_size,
+                                                              kmer_stride, max_mem_length,
+                                                              band_width, pair_window,
+                                                              top_pairs_only, true);
+                    });
                     output_func(p.first, p.second, alnp);
                 }
                 our_mapper->imperfect_pairs_to_retry.clear();
@@ -5389,11 +5423,16 @@ int main_map(int argc, char** argv) {
                  &kmer_size,
                  &kmer_stride,
                  &max_mem_length,
-                 &band_width]
+                 &band_width,
+                 &read_time_limit]
                     (Alignment& alignment) {
 
                         int tid = omp_get_thread_num();
-                        vector<Alignment> alignments = mapper[tid]->align_multi(alignment, kmer_size, kmer_stride, max_mem_length, band_width);
+                        vector<Alignment> alignments;
+                        
+                        Timer::try_time(read_time_limit, [&]() {
+                            alignments = mapper[tid]->align_multi(alignment, kmer_size, kmer_stride, max_mem_length, band_width);
+                        });
 
                         if(alignments.empty()) {
                             // Make sure we have a "no alignment" alignment
@@ -5410,7 +5449,13 @@ int main_map(int argc, char** argv) {
                 (Alignment& aln1,
                  Alignment& aln2,
                  pair<vector<Alignment>, vector<Alignment>>& alnp) {
+                 
                 // Make sure we have unaligned "alignments" for things that don't align.
+                if(alnp.first.empty() && alnp.second.empty()) {
+                    alnp.first.push_back(aln1);
+                    alnp.second.push_back(aln2);
+                }
+                
                 // Output the alignments in JSON or protobuf as appropriate.
                 output_alignments(alnp.first);
                 output_alignments(alnp.second);
@@ -5425,10 +5470,15 @@ int main_map(int argc, char** argv) {
                  &band_width,
                  &pair_window,
                  &top_pairs_only,
-                 &output_func](Alignment& aln1, Alignment& aln2) {
+                 &output_func,
+                 &read_time_limit](Alignment& aln1, Alignment& aln2) {
                 auto our_mapper = mapper[omp_get_thread_num()];
                 bool queued_resolve_later = false;
-                auto alnp = our_mapper->align_paired_multi(aln1, aln2, queued_resolve_later, kmer_size, kmer_stride, max_mem_length, band_width, pair_window, top_pairs_only, false);
+                pair<vector<Alignment>, vector<Alignment>> alnp;
+                Timer::try_time(read_time_limit, [&]() {
+                    alnp = our_mapper->align_paired_multi(aln1, aln2, queued_resolve_later,
+                        kmer_size, kmer_stride, max_mem_length, band_width, pair_window, top_pairs_only, false);
+                });
                 if (!queued_resolve_later) {
                     output_func(aln1, aln2, alnp);
                     // check if we should try to align the queued alignments
@@ -5436,11 +5486,14 @@ int main_map(int argc, char** argv) {
                         && !our_mapper->imperfect_pairs_to_retry.empty()) {
                         int i = 0;
                         for (auto p : our_mapper->imperfect_pairs_to_retry) {
-                            auto alnp = our_mapper->align_paired_multi(p.first, p.second,
-                                                                       queued_resolve_later, kmer_size,
-                                                                       kmer_stride, max_mem_length,
-                                                                       band_width, pair_window,
-                                                                       top_pairs_only, true);
+                            pair<vector<Alignment>, vector<Alignment>> alnp;
+                            Timer::try_time(read_time_limit, [&]() {
+                                alnp = our_mapper->align_paired_multi(p.first, p.second,
+                                                                      queued_resolve_later, kmer_size,
+                                                                      kmer_stride, max_mem_length,
+                                                                      band_width, pair_window,
+                                                                      top_pairs_only, true);
+                            });
                             output_func(p.first, p.second, alnp);
                         }
                         our_mapper->imperfect_pairs_to_retry.clear();
@@ -5454,11 +5507,14 @@ int main_map(int argc, char** argv) {
                 our_mapper->fragment_size = fragment_max;
                 for (auto p : our_mapper->imperfect_pairs_to_retry) {
                     bool queued_resolve_later = false;
-                    auto alnp = our_mapper->align_paired_multi(p.first, p.second,
-                                                               queued_resolve_later, kmer_size,
-                                                               kmer_stride, max_mem_length,
-                                                               band_width, pair_window,
-                                                               top_pairs_only, true);
+                    pair<vector<Alignment>, vector<Alignment>> alnp;
+                    Timer::try_time(read_time_limit, [&]() {
+                        alnp = our_mapper->align_paired_multi(p.first, p.second,
+                                                              queued_resolve_later, kmer_size,
+                                                              kmer_stride, max_mem_length,
+                                                              band_width, pair_window,
+                                                              top_pairs_only, true);
+                    });
                     output_func(p.first, p.second, alnp);
                 }
                 our_mapper->imperfect_pairs_to_retry.clear();

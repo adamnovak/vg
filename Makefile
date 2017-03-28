@@ -100,6 +100,7 @@ OBJ += $(OBJ_DIR)/graph_synchronizer.o
 OBJ += $(OBJ_DIR)/vg_algorithms.o
 OBJ += $(OBJ_DIR)/nested_traversal_finder.o
 OBJ += $(OBJ_DIR)/option.o
+OBJ += $(OBJ_DIR)/timer.o
 
 # These aren't put into libvg. But they do go into the main vg binary to power its self-test.
 UNITTEST_OBJ =
@@ -357,9 +358,9 @@ $(OBJ_DIR)/ssw_aligner.o: $(SRC_DIR)/ssw_aligner.cpp $(SRC_DIR)/ssw_aligner.hpp 
 
 $(OBJ_DIR)/vg_set.o: $(SRC_DIR)/vg_set.cpp $(SRC_DIR)/vg_set.hpp $(SRC_DIR)/vg.hpp $(SRC_DIR)/progressive.hpp $(SRC_DIR)/index.hpp $(DEPS)
 
-$(OBJ_DIR)/mapper.o: $(SRC_DIR)/mapper.cpp $(SRC_DIR)/mapper.hpp $(SRC_DIR)/vg.hpp $(DEPS)
+$(OBJ_DIR)/mapper.o: $(SRC_DIR)/mapper.cpp $(SRC_DIR)/mapper.hpp $(SRC_DIR)/vg.hpp $(SRC_DIR)/timer.hpp $(DEPS)
 
-$(OBJ_DIR)/main.o: $(SRC_DIR)/main.cpp $(INC_DIR)/stream.hpp $(DEPS) $(SRC_DIR)/utility.hpp $(INC_DIR)/globalDefs.hpp $(SRC_DIR)/bubbles.hpp $(SRC_DIR)/genotyper.hpp $(SRC_DIR)/distributions.hpp $(SRC_DIR)/readfilter.hpp $(SRC_DIR)/vg.hpp $(SRC_DIR)/progressive.hpp $(SRC_DIR)/index.hpp $(SUBCOMMAND_SRC_DIR)/subcommand.hpp
+$(OBJ_DIR)/main.o: $(SRC_DIR)/main.cpp $(INC_DIR)/stream.hpp $(DEPS) $(SRC_DIR)/utility.hpp $(INC_DIR)/globalDefs.hpp $(SRC_DIR)/bubbles.hpp $(SRC_DIR)/genotyper.hpp $(SRC_DIR)/distributions.hpp $(SRC_DIR)/readfilter.hpp $(SRC_DIR)/vg.hpp $(SRC_DIR)/progressive.hpp $(SRC_DIR)/index.hpp $(SUBCOMMAND_SRC_DIR)/subcommand.hpp $(SRC_DIR)/timer.hpp
 
 $(OBJ_DIR)/region.o: $(SRC_DIR)/region.cpp $(SRC_DIR)/region.hpp $(DEPS)
 
@@ -452,6 +453,8 @@ $(OBJ_DIR)/nested_traversal_finder.o: $(SRC_DIR)/nested_traversal_finder.cpp $(S
 
 $(OBJ_DIR)/option.o: $(SRC_DIR)/option.cpp $(SRC_DIR)/option.hpp $(DEPS)
 
+$(OBJ_DIR)/timer.o: $(SRC_DIR)/timer.cpp $(SRC_DIR)/timer.hpp $(DEPS)
+
 ### Algorithms ###
 
 $(OBJ_DIR)/vg_algorithms.o: $(ALGORITHMS_SRC_DIR)/vg_algorithms.cpp $(ALGORITHMS_SRC_DIR)/vg_algorithms.hpp $(DEPS)
@@ -480,7 +483,7 @@ $(UNITTEST_OBJ_DIR)/multipath_alignment.o: $(UNITTEST_SRC_DIR)/multipath_alignme
 
 $(UNITTEST_OBJ_DIR)/phased_genome.o: $(UNITTEST_SRC_DIR)/phased_genome.cpp $(UNITTEST_SRC_DIR)/catch.hpp $(SRC_DIR)/phased_genome.hpp $(SRC_DIR)/phased_genome.cpp $(DEPS)
 
-$(UNITTEST_OBJ_DIR)/vg.o: $(UNITTEST_SRC_DIR)/vg.cpp $(UNITTEST_SRC_DIR)/catch.hpp $(SRC_DIR)/vg.hpp $(SRC_DIR)/progressive.hpp $(DEPS)
+$(UNITTEST_OBJ_DIR)/vg.o: $(UNITTEST_SRC_DIR)/vg.cpp $(UNITTEST_SRC_DIR)/catch.hpp $(SRC_DIR)/vg.hpp $(SRC_DIR)/progressive.hpp $(SRC_DIR)/timer.hpp $(DEPS)
 
 $(UNITTEST_OBJ_DIR)/constructor.o: $(UNITTEST_SRC_DIR)/constructor.cpp $(UNITTEST_SRC_DIR)/catch.hpp $(SRC_DIR)/constructor.hpp $(SRC_DIR)/utility.hpp $(SRC_DIR)/name_mapper.hpp $(DEPS)
 

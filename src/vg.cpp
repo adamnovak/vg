@@ -1,6 +1,7 @@
 #include "vg.hpp"
 #include "stream.hpp"
 #include "gssw_aligner.hpp"
+#include "timer.hpp"
 #include <raptor2/raptor2.h>
 #include <stPinchGraphs.h>
 
@@ -3167,6 +3168,7 @@ set<set<id_t> > VG::strongly_connected_components(void) {
             // And it's on the stack
             stack.push_back(trav);
             on_stack.insert(trav);
+            Timer::check();
         },
         [&](NodeTraversal trav) {
             // When a NodeTraversal is done being recursed into
@@ -3198,6 +3200,7 @@ set<set<id_t> > VG::strongly_connected_components(void) {
                 } while (other != trav);
                 components.insert(component);
             }
+            Timer::check();
         });
 
     return components;
@@ -3252,6 +3255,7 @@ bool VG::is_acyclic(void) {
             if (acyclic) {
                 seen.insert(trav);
             }
+            Timer::check();
         },
         [&](NodeTraversal trav) {
             // When we leave a node orientation
@@ -3262,6 +3266,7 @@ bool VG::is_acyclic(void) {
             // orientation when it's further up the stack from the node
             // traversal we are finding the way in from.
             seen.erase(trav);
+            Timer::check();
         },
         [&](void) { // our break function
             return !acyclic;
@@ -6592,6 +6597,7 @@ Alignment VG::align(const Alignment& alignment,
         write_alignment_to_file(alignment, hash_alignment(alignment) + ".gam");
         serialize_to_file(hash_alignment(alignment) + ".vg");
 #endif
+        Timer::check();
         if (aligner && qual_adj_aligner) {
             cerr << "error:[VG] cannot both adjust and not adjust alignment for base quality" << endl;
             exit(1);
@@ -6649,6 +6655,8 @@ Alignment VG::align(const Alignment& alignment,
         // dagify the graph by unfolding inversions and then applying dagify forward unroll
         VG dag = unfold(max_length, unfold_trans)
             .dagify(max_length, dagify_trans, max_length, component_length_max);
+
+        Timer::check();
 
         // overlay the translations
         auto trans = overlay_node_translations(dagify_trans, unfold_trans);
@@ -8894,6 +8902,7 @@ void VG::remove_inverting_edges(void) {
                 && (edge->from_start() || edge->to_end())) {
                 edges.insert(NodeSide::pair_from_edge(edge));
             }
+            Timer::check();
         });
     for (auto edge : edges) {
         destroy_edge(edge);
@@ -8942,6 +8951,7 @@ VG VG::dagify(uint32_t expand_scc_steps,
         } else {
             strongly_connected_and_self_looping_components.insert(component);
         }
+        Timer::check();
     }
     // add in the edges between the weak components
     for (auto& id : weak_components) {
@@ -9003,6 +9013,7 @@ VG VG::dagify(uint32_t expand_scc_steps,
                 }
                 curr[id] = node;
                 node_translation[node->id()] = make_pair(id, false);
+                Timer::check();
             }
             // preserve the edges that connect these nodes to the rest of the graph
             // And connect to the nodes in this and the previous component using the original edges as guide
@@ -9078,6 +9089,7 @@ VG VG::dagify(uint32_t expand_scc_steps,
                                                           : mm);
                         }
                     }
+                    Timer::check();
                 }
             }
             // update the minimum minimim return length

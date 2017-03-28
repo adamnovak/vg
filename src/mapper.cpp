@@ -1,5 +1,6 @@
 #include <unordered_set>
 #include "mapper.hpp"
+#include "timer.hpp"
 
 //#define debug_mapper
 
@@ -469,6 +470,8 @@ pos_t Mapper::likely_mate_position(const Alignment& aln, bool is_first_mate) {
 }
 
 bool Mapper::pair_rescue(Alignment& mate1, Alignment& mate2) {
+    Timer::check();
+
     // bail out if we can't figure out how far to go
     if (!fragment_size) return false;
     //auto aligner = (mate1.quality().empty() ? get_regular_aligner() : get_qual_adj_aligner());
@@ -525,7 +528,9 @@ bool Mapper::pair_rescue(Alignment& mate1, Alignment& mate2) {
                         : max((int)cached_fragment_length_stdev * 6 + mate1.sequence().size(),
                               mate1.sequence().size() * 4));
     cached_graph_context(graph, mate_pos, get_at_least/2, node_cache, edge_cache);
+    Timer::check();
     cached_graph_context(graph, reverse(mate_pos, get_node_length(id(mate_pos))), get_at_least/2, node_cache, edge_cache);
+    Timer::check();
     graph.remove_orphan_edges();
     //cerr << "got graph " << pb2json(graph.graph) << endl;
     // if we're reversed, align the reverse sequence and flip it back
@@ -1721,6 +1726,8 @@ pair<vector<Alignment>, vector<Alignment>> Mapper::align_paired_multi_simul(
         }
     };
 
+    Timer::check();
+
     // build the paired-read MEM markov model
     MEMChainModel markov_model({ read1.sequence().size(), read2.sequence().size() }, { mems1, mems2 }, this, transition_weight, max((int)(read1.sequence().size() + read2.sequence().size()), (int)(fragment_size ? fragment_size : fragment_max)));
     vector<vector<MaximalExactMatch> > clusters = markov_model.traceback(total_multimaps, true, debug);
@@ -1776,6 +1783,7 @@ pair<vector<Alignment>, vector<Alignment>> Mapper::align_paired_multi_simul(
                 assert(false);
             }
         }
+        Timer::check();
     }
     auto to_drop1 = clusters_to_drop(clusters1);
     auto to_drop2 = clusters_to_drop(clusters2);
@@ -1823,6 +1831,7 @@ pair<vector<Alignment>, vector<Alignment>> Mapper::align_paired_multi_simul(
             if (debug) { cerr << "patch identities " << p.first.identity() << ", " << p.second.identity() << endl; }
         }
 #endif
+        Timer::check();
     }
     auto sort_and_dedup = [&](void) {
         // sort the aligned pairs
@@ -2501,6 +2510,8 @@ void Mapper::cached_graph_context(VG& graph, const pos_t& pos, int length, LRUCa
                 for (auto& x : xg_cached_next_pos(next, true, xindex, node_cache, edge_cache)) {
                     todo.insert(x);
                 }
+                
+                Timer::check();
             }
         }
         distance += nextd;
