@@ -229,7 +229,7 @@ BaseMapper::find_mems_simple(string::const_iterator seq_begin,
                 while (reseeds == 0 && reseed_to >= min_mem_length) {
 #ifdef debug_mapper
 #pragma omp critical
-                    if (debug) cerr << "reseeding " << mem.sequence() << " with " << reseed_to << endl;
+                    cerr << "reseeding " << mem.sequence() << " with " << reseed_to << endl;
 #endif
                     vector<MaximalExactMatch> remems = find_mems_simple(mem.begin,
                                                                         mem.end,

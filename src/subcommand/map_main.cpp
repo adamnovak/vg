@@ -776,6 +776,12 @@ int main_map(int argc, char** argv) {
                 auto our_mapper = mapper[omp_get_thread_num()];
                 // if we haven't yet computed these, assume we couldn't get an estimate for fragment size
                 our_mapper->fragment_size = fragment_max;
+                // Fill in the cached versions since they have to be set to get the best mappings
+                // But set them to the most permissive values.
+                our_mapper->cached_fragment_length_mean = fragment_max;
+                our_mapper->cached_fragment_length_stdev = fragment_max;
+                our_mapper->cached_fragment_orientation = fragment_orientation;
+                our_mapper->cached_fragment_direction = fragment_direction;
                 for (auto p : our_mapper->imperfect_pairs_to_retry) {
                     bool queued_resolve_later = false;
                     auto alnp = our_mapper->align_paired_multi(p.first, p.second,
@@ -862,6 +868,12 @@ int main_map(int argc, char** argv) {
             {
                 auto our_mapper = mapper[omp_get_thread_num()];
                 our_mapper->fragment_size = fragment_max;
+                // Fill in the cached versions since they have to be set to get the best mappings
+                // But set them to the most permissive values.
+                our_mapper->cached_fragment_length_mean = fragment_max;
+                our_mapper->cached_fragment_length_stdev = fragment_max;
+                our_mapper->cached_fragment_orientation = fragment_orientation;
+                our_mapper->cached_fragment_direction = fragment_direction;
                 for (auto p : our_mapper->imperfect_pairs_to_retry) {
                     bool queued_resolve_later = false;
                     auto alnp = our_mapper->align_paired_multi(p.first, p.second,
