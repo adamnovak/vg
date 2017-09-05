@@ -942,10 +942,11 @@ class VGCITest(TestCase):
     @timeout_decorator.timeout(16000)        
     def test_sim_chr21_snp1kg(self):
         self._test_mapeval(300000, 'CHR21', 'snp1kg',
-                           ['primary', 'snp1kg', 'common1kg', 'snp1kg_HG00096', 'snp1kg_minus_HG00096'],
-                           score_baseline_graph='primary',
-                           positive_control='snp1kg_HG00096',
-                           negative_control='snp1kg_minus_HG00096',
+                           ['snp1kg', 'thresholded1kg', 'thresholded2', 'thresholded4', 'thresholded10'],
+                           #['primary', 'snp1kg', 'common1kg', 'snp1kg_HG00096', 'snp1kg_minus_HG00096'],
+                           #score_baseline_graph='primary',
+                           #positive_control='snp1kg_HG00096',
+                           #negative_control='snp1kg_minus_HG00096',
                            sample='HG00096',
                            assembly="hg19")
 
