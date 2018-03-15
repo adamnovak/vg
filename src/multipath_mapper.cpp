@@ -2237,9 +2237,19 @@ namespace vg {
         multi_aln_graph.to_dot(cerr);
 #endif
         
-        // prune this graph down the paths that have reasonably high likelihood
-        multi_aln_graph.prune_to_high_scoring_paths(alignment, get_aligner(),
-                                                    max_suboptimal_path_score_ratio, topological_order);
+        if (!snarl_manager) {
+            // If a snarl manager is used, we are using snarl cutting, so the
+            // "MEMs" in multi_aln_graph have been cut and portions internal to
+            // snarls have been removed. This breaks some of the assumptions
+            // that prune_to_high_scoring_paths() makes about whether a gap
+            // between MEMs can be crossed or not. To work around this, we only
+            // do the pruning step when not using snarl cutting.
+        
+            // prune this graph down the paths that have reasonably high
+            // likelihood
+            multi_aln_graph.prune_to_high_scoring_paths(alignment, get_aligner(),
+                                                        max_suboptimal_path_score_ratio, topological_order);
+        }
         
 #ifdef debug_multipath_mapper_alignment
         cerr << "pruned to high scoring paths, topology is:" << endl;
