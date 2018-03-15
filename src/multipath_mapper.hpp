@@ -323,6 +323,9 @@ namespace vg {
         /// ordering of their target nodes
         void reorder_adjacency_lists(const vector<size_t>& order);
         
+        /// Converts a MultipathAlignmentGraph to a GraphViz Dot representation, output to the given ostream.
+        void to_dot(ostream& out) const;
+        
         /// Nodes representing walked MEMs in the graph
         vector<ExactMatchNode> match_nodes;
         

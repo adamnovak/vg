@@ -6,6 +6,7 @@
 
 //#define debug_multipath_mapper_mapping
 //#define debug_multipath_mapper_alignment
+//#define debug_multipath_mapper_graph
 //#define debug_validate_multipath_alignments
 //#define debug_report_startup_training
 
@@ -2230,6 +2231,11 @@ namespace vg {
             }
         }
 #endif
+
+#ifdef debug_multipath_mapper_graph
+        cerr << "MultipathAlignmentGraph after snarl cutting, sort, and de-transitivification:" << endl;
+        multi_aln_graph.to_dot(cerr);
+#endif
         
         // prune this graph down the paths that have reasonably high likelihood
         multi_aln_graph.prune_to_high_scoring_paths(alignment, get_aligner(),
@@ -2247,6 +2253,11 @@ namespace vg {
                 cerr << "\tto " << edge.first << ", dist " << edge.second << endl;
             }
         }
+#endif
+
+#ifdef debug_multipath_mapper_graph
+        cerr << "MultipathAlignmentGraph after pruning:" << endl;
+        multi_aln_graph.to_dot(cerr);
 #endif
         
         // create a new multipath alignment object and transfer over data from alignment
@@ -5771,6 +5782,52 @@ namespace vg {
             }
         }
         match_nodes.resize(next);
+    }
+    
+    void MultipathAlignmentGraph::to_dot(ostream& out) const {
+        // We track the VG graph nodes we talked about already.
+        set<id_t> mentioned_nodes;
+        set<pair<id_t, id_t>> mentioned_edges;
+    
+        out << "digraph graphname {" << endl;
+        out << "rankdir=\"LR\";" << endl;
+        for (size_t i = 0; i < match_nodes.size(); i++) {
+            // For each node, say the node itself as a mapping node, annotated with match length
+            out << "m" << i << " [label=\"" << i << "\" shape=circle tooltip=\""
+                << (match_nodes[i].end - match_nodes[i].begin) << " bp\"];" << endl;
+            for (pair<size_t, size_t> edge : match_nodes[i].edges) {
+                // For each edge from it, say where it goes and how far it skips
+                out << "m" << i << " -> m" << edge.first << " [label=" << edge.second << "];" << endl;
+            }
+            auto& path = match_nodes[i].path;
+            for (size_t j = 0; j < path.mapping_size(); j++) {
+                // For each mapping in the path, show the vg node in the graph too
+                auto node_id = path.mapping(j).position().node_id();
+                
+                if (!mentioned_nodes.count(node_id)) {
+                    // This graph node eneds to be made
+                    mentioned_nodes.insert(node_id);
+                    out << "g" << node_id << " [label=\"" << node_id << "\" shape=box];" << endl;
+                }
+                
+                // Attach the mapping to each involved graph node.
+                out << "m" << i << " -> g" << node_id << " [dir=none color=blue];" << endl;
+                
+                if (j != 0) {
+                    // We have a previous node in this segment of path. What is it?
+                    auto prev_id = path.mapping(j-1).position().node_id();
+                    pair<id_t, id_t> edge_pair{prev_id, node_id};
+                    
+                    if (!mentioned_edges.count(edge_pair)) {
+                        // This graph edge needs to be made
+                        mentioned_edges.insert(edge_pair);
+                        
+                        out << "g" << prev_id << " -> g" << node_id << ";" << endl;
+                    }
+                }
+            }
+        }
+        out << "}" << endl;
     }
 }
 
