@@ -571,8 +571,9 @@ ChainIterator chain_end_from(const Chain& chain, const Snarl* start_snarl, bool 
 // disallow copy constructors
 SnarlManager::SnarlManager(istream& in) {
     // add snarls to master list
-    for (stream::ProtobufIterator<Snarl> iter(in); iter.has_next(); iter.get_next()) {
-        snarls.push_back(*iter);
+    for (stream::ProtobufIterator<Snarl> iter(in); iter.has_next();) {
+        // Move the snarl into place
+        snarls.emplace_back(std::move(iter.take()));
     }
     // record the tree structure and build the other indexes
     build_indexes();
