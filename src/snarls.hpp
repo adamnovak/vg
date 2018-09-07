@@ -530,23 +530,27 @@ private:
     vector<const Snarl*> roots;
     /// Chains of root-level snarls. Uses a deque so Chain* pointers don't get invalidated.
     deque<Chain> root_chains;
+
+    // For internal indexes we use hash_map, which uses wang_hash, which
+    // hopefully gets us better hashing of pairs of similar integers like
+    // key_t.
         
     /// Map of snarls to the child snarls they contain
-    unordered_map<key_t, vector<const Snarl*>> children;
+    hash_map<key_t, vector<const Snarl*>> children;
     /// Map of snarls to the child chains they contain
     /// Uses a deque so Chain* pointers don't get invalidated.
-    unordered_map<key_t, deque<Chain>> child_chains;
+    hash_map<key_t, deque<Chain>> child_chains;
     /// Map of snarls to their parent snarls
-    unordered_map<key_t, const Snarl*> parent;
+    hash_map<key_t, const Snarl*> parent;
     /// Map of snarls to the chain each appears in
-    unordered_map<key_t, const Chain*> parent_chain;
+    hash_map<key_t, const Chain*> parent_chain;
         
     /// Map of snarl keys to the pointer to the managed copy in the snarls vector.
     /// Is non-const so we can do flip nicely.
-    unordered_map<key_t, Snarl*> self;
+    hash_map<key_t, Snarl*> self;
         
     /// Map of node traversals to the snarls they point into
-    unordered_map<pair<int64_t, bool>, const Snarl*> snarl_into;
+    hash_map<pair<int64_t, bool>, const Snarl*> snarl_into;
         
     /// Converts Snarl to the form used as keys in internal data structures
     inline key_t key_form(const Snarl* snarl) const;
