@@ -901,7 +901,16 @@ void SnarlManager::build_indexes() {
 #ifdef debug
     cerr << "Building SnarlManager index of " << snarls.size() << " snarls" << endl;
 #endif
-        
+    
+    // Make sure our hash tables are big enough.
+    // Some of these will be too big. Too bad.
+    children.reserve(snarls.size());
+    child_chains.reserve(snarls.size());
+    parent.reserve(snarls.size());
+    parent_chain.reserve(snarls.size());
+    self.reserve(snarls.size());
+    snarl_into.reserve(snarls.size());
+
     for (Snarl& snarl : snarls) {
             
 #ifdef debug
