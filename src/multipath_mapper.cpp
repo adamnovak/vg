@@ -41,7 +41,7 @@ namespace vg {
                                         size_t max_alt_mappings) {
         multipath_map_internal(alignment, mapping_quality_method, multipath_alns_out, max_alt_mappings);
     }
-    
+
     void MultipathMapper::multipath_map_internal(const Alignment& alignment,
                                                  MappingQualityMethod mapq_method,
                                                  vector<MultipathAlignment>& multipath_alns_out,
@@ -100,6 +100,14 @@ namespace vg {
         
         // extract graphs around the clusters
         auto cluster_graphs = query_cluster_graphs(alignment, mems, clusters);
+#ifdef debug_multipath_mapper
+        cerr << "obtained graphs:" << endl;
+        for (int i = 0; i < cluster_graphs.size(); i++) {
+            cerr << "\tgraph " << i << endl;
+            cerr << "\t" << pb2json(get<0>(cluster_graphs[i])->graph) << endl;
+        }
+#endif
+        
         
         // actually perform the alignments and post-process to meet MultipathAlignment invariants
         vector<size_t> cluster_idxs = range_vector(cluster_graphs.size());
@@ -200,6 +208,21 @@ namespace vg {
             
             multipath_alns_out.emplace_back();
             multipath_align(alignment, get<0>(cluster_graph), get<1>(cluster_graph), multipath_alns_out.back());
+            
+            if(multipath_alns_out.back().subpath_size() == 0) {
+                VG* extracted = get<0>(cluster_graph);
+                memcluster_t& mems = get<1>(cluster_graph);
+                size_t bases_covered =  get<2>(cluster_graph);
+                cerr << "Aligning " << bases_covered << " bases to " << mems.size() << " mems in graph with "
+                    << extracted->node_count() << " nodes failed to produce a real alignment!" << endl;
+                cerr << "Graph: " << pb2json(extracted->graph) << endl;
+                cerr << "Mems: " << endl;
+                
+                for (auto& mem : mems) {
+                    cerr << "\t" << *mem.first << " " << mem.second << endl;
+                }
+                exit(1);
+            }
             
             num_mappings++;
         }
@@ -2563,6 +2586,9 @@ namespace vg {
                                            + (alignment.sequence().end() - mem_hit.first->begin));
                 backward_max_dist.push_back(aligner->longest_detectable_gap(alignment, mem_hit.first->begin)
                                             + (mem_hit.first->begin - alignment.sequence().begin()));
+#ifdef debug_multipath_mapper                            
+                cerr << "\t" << positions.back() << " forward " << forward_max_dist.back() << " reverse " << backward_max_dist.back() << endl;
+#endif
             }
             
             
@@ -2575,6 +2601,10 @@ namespace vg {
             algorithms::extract_containing_graph(xindex, cluster_graph, positions, forward_max_dist,
                                                  backward_max_dist);
             Graph& graph = cluster_graph->graph;
+            
+#ifdef debug_multipath_mapper
+            cerr << "\tGot " << cluster_graph->node_size() << " nodes" << endl;
+#endif
 
                                                  
             // check if this subgraph overlaps with any previous subgraph (indicates a probable clustering failure where
@@ -2899,22 +2929,36 @@ namespace vg {
 #endif
         if (use_single_stranded) {
             if (mem_strand) {
+#ifdef debug_multipath_mapper_alignment
+                cerr << "Reverse-complement graph" << endl;
+#endif
                 align_graph = vg->reverse_complement_graph(node_trans);
             }
             else {
                 // if we are using only the forward strand of the current graph, a make trivial node translation so
                 // the later code's expectations are met
                 // TODO: can we do this without the copy constructor?
+#ifdef debug_multipath_mapper_alignment
+                cerr << "Copy graph" << endl;
+#endif
                 align_graph = *vg;
                 vg->identity_translation(node_trans);
             }
         }
         else {
+#ifdef debug_multipath_mapper_alignment
+            cerr << "Split strands" << endl;
+#endif
             node_trans = algorithms::split_strands(vg, &align_graph);
         }
 
         // if necessary, convert from cyclic to acylic
         if (!algorithms::is_directed_acyclic(vg)) {
+            
+#ifdef debug_multipath_mapper_alignment
+            cerr << "Dagify graph" << endl;
+#endif
+        
             unordered_map<id_t, pair<id_t, bool> > dagify_trans;
             align_graph = align_graph.dagify(target_length, // high enough that num SCCs is never a limiting factor
                                              dagify_trans,
@@ -2927,13 +2971,26 @@ namespace vg {
         algorithms::lazier_sort(&align_graph);
         
 #ifdef debug_multipath_mapper_alignment
-        cerr << "making multipath alignment MEM graph" << endl;
+        cerr << "making multipath alignment MEM graph from align_graph with " << align_graph.node_size() << " nodes" << endl;
 #endif
         
         // construct a graph that summarizes reachability between MEMs
         // First we need to reverse node_trans
         auto node_inj = MultipathAlignmentGraph::create_injection_trans(node_trans);
         MultipathAlignmentGraph multi_aln_graph(align_graph, graph_mems, node_trans, node_inj, gcsa);
+        
+#ifdef debug_multipath_mapper_alignment
+        cerr << "Original MultipathAlignmentGraph:" << endl;
+        multi_aln_graph.to_dot(cerr);
+        
+        for (auto& ids : multi_aln_graph.get_connected_components()) {
+            cerr << "Component: ";
+            for (auto& id : ids) {
+                cerr << id << " ";
+            }
+            cerr << endl;
+        }
+#endif
         
         {
             // Compute a topological order over the graph
@@ -3174,7 +3231,6 @@ namespace vg {
             // scoring.
             auto wanted_alignments = query_population ? population_max_paths : 1;
             auto alignments = optimal_alignments(multipath_alns[i], wanted_alignments);
-            assert(!alignments.empty());
             
 #ifdef debug_multipath_mapper
             cerr << "Got " << alignments.size() << " / " << wanted_alignments << " tracebacks for multipath " << i << endl;
@@ -3182,6 +3238,8 @@ namespace vg {
 #ifdef debug_multipath_mapper_alignment
             cerr << pb2json(multipath_alns[i]) << endl;
 #endif
+           
+            assert(!alignments.empty());
            
             // Collect the score of the optimal alignment, to use if population
             // scoring fails for a multipath alignment. Put it in the optimal

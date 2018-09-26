@@ -338,6 +338,7 @@ namespace vg {
         
 #ifdef debug_multiple_tracebacks
         cerr << "Computing top " << count << " alignments" << endl;
+        cerr << "Multipath is: " << pb2json(multipath_aln) << endl;
 #endif
         
         // Keep a list of what we're going to emit.
@@ -439,6 +440,12 @@ namespace vg {
                 
                 try_enqueue(make_pair(penalty, starting_path));
             }
+        }
+        
+        if (queue.empty() && count != 0) {
+            // We have nowhere to trace back from, but we need to produce a traceback.
+            // Something has gone wrong.
+            throw runtime_error("Found no valid places to start a traceback!");
         }
         
         while (!queue.empty() && to_return.size() < count) {

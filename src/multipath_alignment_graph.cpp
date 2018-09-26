@@ -428,7 +428,7 @@ namespace vg {
         cerr << "finished trimming hanging indels" << endl;
 #endif
     }
-    
+
     void MultipathAlignmentGraph::create_match_nodes(VG& vg, const MultipathMapper::memcluster_t& hits,
                                                      const unordered_map<id_t, pair<id_t, bool>>& projection_trans,
                                                      const unordered_multimap<id_t, pair<id_t, bool>>& injection_trans) {
@@ -660,6 +660,9 @@ namespace vg {
 #endif
             }
         }
+        
+        // There have to be some actual matches. We should never throw out all the MEMs
+        assert(!node_matches.empty());
     }
     
     void MultipathAlignmentGraph::collapse_order_length_runs(VG& vg, gcsa::GCSA* gcsa) {
