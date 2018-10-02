@@ -220,6 +220,7 @@ DEPS += $(INC_DIR)/progress_bar.hpp
 DEPS += $(INC_DIR)/backward.hpp
 
 ifneq ($(shell uname -s),Darwin)
+	# Change these to tcmalloc_debug, or remove them, if you want to use valgrind
 	DEPS += $(LIB_DIR)/libtcmalloc_minimal.a
 	LD_LIB_FLAGS += -ltcmalloc_minimal
 endif
@@ -275,6 +276,8 @@ $(GPERF_DIR)/src/tcmalloc.cc.bak:
 
 $(LIB_DIR)/libtcmalloc_minimal.a: $(GPERF_DIR)/src/tcmalloc.cc.bak
 	+. ./source_me.sh && cd $(GPERF_DIR) && ./autogen.sh && ./configure --prefix=`pwd` $(FILTER) && $(MAKE) $(FILTER) && $(MAKE) install && cp -r lib/* $(CWD)/$(LIB_DIR)/ && cp -r bin/* $(CWD)/$(BIN_DIR)/ && cp -r include/* $(CWD)/$(INC_DIR)/
+	
+$(LIB_DIR)/libtcmalloc_debug.a: $(LIB_DIR)/libtcmalloc_minimal.a
 
 $(LIB_DIR)/libsdsl.a: $(SDSL_DIR)/lib/*.cpp $(SDSL_DIR)/include/sdsl/*.hpp
 ifeq ($(shell uname -s),Darwin)
