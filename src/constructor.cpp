@@ -599,6 +599,12 @@ namespace vg {
                         trim_to_variable(parsed_clump[variant]);
                     } else {
                         cerr << "Is symbolic: " << *variant << endl;
+                        
+                        cerr << variant->alt.at(0) << endl;
+                        for (char chr : variant->alt.at(0)) {
+                            cerr << "Character: " << (int) chr << endl;
+                        }
+                        
                         // For now, only permit one allele for SVs
                         // in the future, we'll build out VCF lib to fix this.
                         // TODO build out vcflib to fix this.
