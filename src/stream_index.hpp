@@ -219,6 +219,9 @@ public:
     /// Save an index to a file.
     void save(ostream& to) const;
     
+    /// Report statistics about an index
+    void report() const;
+    
     // Like the XG we support versioning.
     
     /// What's the maximum index version number we can read with this code?
@@ -264,13 +267,26 @@ public:
     /// Find all the ranges of run virtual offsets to check for reads visiting
     /// the given inclusive node ID range. Relies on a scanning callback, which
     /// will be called repeatedly with the start and past-the-end virtual
-    /// offsets of runs which may contain groups touching the given node ID.
-    /// When called, the callback should scan the run and return either true if
-    /// it wants the next run, or false if it encountered a group with an
-    /// out-of-range start and wants to stop iteration. Runs will be emitted in
-    /// order, and truncated on the left to either the appropriate lower bound
-    /// from the linear index, or the past-the-end of the previous run scanned.
+    /// offsets of runs which may contain groups touching the given node ID
+    /// range. When called, the callback should scan the run and return either
+    /// true if it wants the next run, or false if it encountered a group with
+    /// an out-of-range start and wants to stop iteration. Runs will be emitted
+    /// in order, and truncated on the left to either the appropriate lower
+    /// bound from the linear index, or the past-the-end of the previous run
+    /// scanned.
     void find(id_t min_node, id_t max_node, const function<bool(int64_t, int64_t)> scan_callback) const;
+    
+    /// Find all the ranges of runs of virtual offsets to check for reads
+    /// visiting any of the given inclusive node ID ranges. Relies on a
+    /// scanning callback, which will be called repeatedly with the start and
+    /// past-the-end virtual offsets of runs which may contain groups touching
+    /// the given node ID ranges. When called, the callback should scan the run
+    /// and return either true if it wants the next run, or false if it
+    /// encountered a group with an out-of-range start and wants to stop
+    /// iteration. Runs will be emitted in order, and truncated on the left to
+    /// either the appropriate lower bound from the linear index, or the
+    /// past-the-end of the previous run scanned.
+    void find(vector<pair<id_t, id_t>> node_ranges, const function<bool(int64_t, int64_t)> scan_callback) const;
     
     /// Iterate over ranges of virtual offsets from the end of the file to the
     /// start. The ranges to *not* necessarily correspond to runs. The ending
@@ -298,6 +314,9 @@ public:
     
     /// Get the most specific bin that contains both of the given node IDs.
     static bin_t common_bin(id_t a, id_t b);
+    
+    /// Get the bounding IDs of a bin
+    static pair<id_t, id_t> bin_id_range(bin_t bin);
     
     /// Get the linear index window that the given node ID falls in. The window
     /// range for a group is its min nodes' window through its max node's
@@ -639,6 +658,10 @@ auto StreamIndex<Message>::find(cursor_t& cursor, const vector<pair<id_t, id_t>>
         cerr << "\t" << range.first << "-" << range.second << endl;
     }
 #endif
+
+    // Sum up total relevant and irrelevant deserialized items
+    size_t total_hits = 0;
+    size_t total_misses = 0;
     
     // We need seek support
     assert(cursor.tell_raw() != -1);
@@ -673,7 +696,7 @@ auto StreamIndex<Message>::find(cursor_t& cursor, const vector<pair<id_t, id_t>>
             chain.push_back(currently_at);
             
 #ifdef debug
-            cerr << currently_at << " chains to " << found->second << endl;
+            cerr << "Skip previously processed group " << currently_at << " and skip to " << found->second << endl;
 #endif
             
             // Advance to the place we found.
@@ -713,6 +736,10 @@ auto StreamIndex<Message>::find(cursor_t& cursor, const vector<pair<id_t, id_t>>
         
         find(range.first, range.second, [&](int64_t start_vo, int64_t past_end_vo) -> bool {
             // For each matching range of virtual offsets in the index
+            
+            // We want to count hit and miss items
+            size_t hits = 0;
+            size_t misses = 0;
             
 #ifdef debug
             cerr << "Look at VOs " << start_vo << "-" << past_end_vo << endl;
@@ -767,8 +794,11 @@ auto StreamIndex<Message>::find(cursor_t& cursor, const vector<pair<id_t, id_t>>
                         
 #ifdef debug
                         cerr << "Group was out of bounds for its range with min id " << group_min_id << " > " << range.second << endl;
-                        cerr << "Move on to next range" << endl;
+                        cerr << "Passed relevant part of VO range: " << hits << " matching items and " << misses << " irrelevant ones" << endl;
 #endif
+
+                        total_hits += hits;
+                        total_misses += misses;
                         
                         // Stop early. Don't finish this run and don't look at the next runs for this query range.
                         return false;
@@ -833,12 +863,22 @@ auto StreamIndex<Message>::find(cursor_t& cursor, const vector<pair<id_t, id_t>>
                 if (message_match) {
                     // This message is one that matches the query. Yield it.
                     handle_result(message);
+                    hits++;
+                } else {
+                    misses++;
                 }
                 
                 // Look for the next message
                 cursor.get_next();
                 
             }
+            
+#ifdef debug
+            cerr << "Finished VO range: " << hits << " matching items and " << misses << " irrelevant ones" << endl;
+#endif    
+        
+            total_hits += hits;
+            total_misses += misses;
            
             if (group_vo < past_end_vo) {
                 // We finished a final group, from group_vo to past_end_vo
@@ -868,6 +908,10 @@ auto StreamIndex<Message>::find(cursor_t& cursor, const vector<pair<id_t, id_t>>
         });
         
     }
+    
+#ifdef debug
+    cerr << "Total index accuracy: " << total_hits << " matching items and " << total_misses << " irrelevant ones" << endl;
+#endif
 }
 
 template<typename Message>

@@ -234,6 +234,24 @@ auto StreamIndexBase::common_bin(id_t a, id_t b) -> bin_t {
     return a_bin + offset;
 }
 
+auto StreamIndexBase::bin_id_range(bin_t bin) -> pair<id_t, id_t> {
+    // Get the prefix
+    BitString bin_prefix = bin_to_prefix(bin);
+   
+    // Get the bits
+    uint64_t bin_bits = bin_prefix.to_number();
+    
+    // Shift them up to where they belong
+    bin_bits = bin_bits << (numeric_limits<uint64_t>::digits - bin_prefix.length());
+    
+    // That can be the low end of the range, but the high end needs those low bits filled with 1s.
+    uint64_t high = ~(uint64_t)0;
+    high = high >> bin_prefix.length();
+    high = high | bin_bits;
+    
+   return make_pair((id_t) bin_bits, (id_t) high); 
+}
+
 auto StreamIndexBase::window_of_id(id_t id) -> window_t  {
     return id >> WINDOW_SHIFT;
 }
@@ -415,7 +433,10 @@ auto StreamIndexBase::find(id_t min_node, id_t max_node, const function<bool(int
         // So after we deal with this run, we won't have to adjust any other bin cursors.
         
 #ifdef debug
-        cerr << "Found run " << top.first->first << "-" << top.first->second << endl;
+        bin_t run_bin = used_bins[top.second]->first;
+        auto bin_ids = bin_id_range(run_bin);
+        cerr << "Found run " << top.first->first << "-" << top.first->second << " in bin "
+            << run_bin << " prefix " << bin_to_prefix(run_bin) << " covering IDs " << bin_ids.first << " to " << bin_ids.second << endl;
 #endif
         
         // Call the callback with the range max(min_vo from the window, that run's start) to that run's end.
@@ -564,7 +585,7 @@ auto StreamIndexBase::load(istream& from) -> void {
     
     // Define an error handling function
     auto handle = [](bool ok) {
-        if (!ok) throw std::runtime_error("GAMIndex::load detected corrupt index file");
+        if (!ok) throw std::runtime_error("StreamIndexBase::load detected corrupt index file");
     };
     
     // Look for the magic value
@@ -603,7 +624,7 @@ auto StreamIndexBase::load(istream& from) -> void {
     }
     
     if (input_version > MAX_INPUT_VERSION) {
-        throw std::runtime_error("GAMIndex::load can understand only up to index version " + to_string(MAX_INPUT_VERSION) +
+        throw std::runtime_error("StreamIndexBase::load can understand only up to index version " + to_string(MAX_INPUT_VERSION) +
             " and file is version " + to_string(input_version));
     }
     
@@ -676,7 +697,33 @@ auto StreamIndexBase::load(istream& from) -> void {
         }
         break;
     default:
-        throw std::runtime_error("Unimplemented GAM index version " + to_string(input_version));
+        throw std::runtime_error("Unimplemented stream index version " + to_string(input_version));
+    }
+    
+}
+
+auto StreamIndexBase::report() const -> void {
+
+    for (auto& kv : bin_to_ranges) {
+        // Get the bounding VOs for the bin's contents
+        
+        // Sum up how many post-compression bytes are in the bin, about.
+        // Ignores anything smaller than 1 BGZF block
+        size_t file_bytes = 0;
+        for (auto range : kv.second) {
+            // Compute the file offset range covered by the virtual offset pair
+            auto start_real_offset = range.first >> 16;
+            auto end_real_offset = range.second >> 16;
+            
+            file_bytes += end_real_offset - start_real_offset;
+        }
+        
+        // Work out how mnay IDs are covered by the bin
+        auto id_range = bin_id_range(kv.first);
+        
+        // Report each bin, leading with the estimated data size, which lets you know if a bin is overly full
+        cerr <<(file_bytes >> 20) << " MB and " << (id_range.second - id_range.first) << " nodes in "
+            << kv.second.size() << " ranges in prefix " << bin_to_prefix(kv.first) << endl;
     }
 
 }
