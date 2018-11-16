@@ -5,6 +5,7 @@
 #include "../stream.hpp"
 #include "../region.hpp"
 #include "../stream_index.hpp"
+#include "../indexed_vg.hpp"
 #include "../algorithms/sorted_id_ranges.hpp"
 
 #include <unistd.h>
@@ -16,8 +17,9 @@ using namespace vg::subcommand;
 void help_find(char** argv) {
     cerr << "usage: " << argv[0] << " find [options] >sub.vg" << endl
          << "options:" << endl
-         << "    -d, --db-name DIR      use this db (defaults to <graph>.index/)" << endl
-         << "    -x, --xg-name FILE     use this xg index (instead of rocksdb db)" << endl
+         << "    -d, --db-name DIR      use this RocksDB db for graph queries" << endl
+         << "    -x, --xg-name FILE     use this xg index for graph queries" << endl
+         << "    -v, --vg-name FILE     use this id-sorted .vg file with .vg.vgi index for graph queries" << endl
          << "graph features:" << endl
          << "    -n, --node ID          find node(s), return 1-hop context as graph" << endl
          << "    -N, --node-list FILE   a white space or line delimited list of nodes to collect" << endl
@@ -69,6 +71,8 @@ int main_find(int argc, char** argv) {
     }
 
     string db_name;
+    string xg_name;
+    string sorted_vg_name;
     string sequence;
     int kmer_size=0;
     int kmer_stride = 1;
@@ -85,7 +89,6 @@ int main_find(int argc, char** argv) {
     bool rank_in = false;
     string range;
     string gcsa_in;
-    string xg_name;
     bool get_mems = false;
     int mem_reseed_length = 0;
     bool use_fast_reseed = true;
@@ -116,6 +119,7 @@ int main_find(int argc, char** argv) {
                 //{"verbose", no_argument,       &verbose_flag, 1},
                 {"db-name", required_argument, 0, 'd'},
                 {"xg-name", required_argument, 0, 'x'},
+                {"vg-name", required_argument, 0, 'v'},
                 {"gcsa", required_argument, 0, 'g'},
                 {"node", required_argument, 0, 'n'},
                 {"node-list", required_argument, 0, 'N'},
@@ -155,7 +159,7 @@ int main_find(int argc, char** argv) {
             };
 
         int option_index = 0;
-        c = getopt_long (argc, argv, "d:x:n:e:s:o:k:hc:LS:z:j:CTp:P:r:l:amg:M:R:B:fDH:G:N:A:Y:Z:tq:X:IQ:",
+        c = getopt_long (argc, argv, "d:x:v:n:e:s:o:k:hc:LS:z:j:CTp:P:r:l:amg:M:R:B:fDH:G:N:A:Y:Z:tq:X:IQ:",
                          long_options, &option_index);
 
         // Detect the end of the options.
@@ -170,6 +174,10 @@ int main_find(int argc, char** argv) {
 
         case 'x':
             xg_name = optarg;
+            break;
+            
+        case 'v':
+            sorted_vg_name = optarg;
             break;
 
         case 'g':
@@ -332,17 +340,19 @@ int main_find(int argc, char** argv) {
         return 1;
     }
 
-    if (db_name.empty() && gcsa_in.empty() && xg_name.empty() && sorted_gam_name.empty()) {
-        cerr << "[vg find] find requires -d, -g, -x, or -l to know where to find its database" << endl;
+    if (db_name.empty() && gcsa_in.empty() && xg_name.empty() && sorted_vg_name.empty() && sorted_gam_name.empty()) {
+        cerr << "[vg find] find requires -d, -g, -x, -v, or -l to know where to find its database" << endl;
         return 1;
     }
 
     if (context_size > 0 && use_length == true && xg_name.empty()) {
+        // TODO: support sorted VG here
         cerr << "[vg find] error, -L not supported without -x" << endl;
         exit(1);
     }
     
     if (xg_name.empty() && mem_reseed_length) {
+        // TODO: support sorted VG here
         cerr << "error:[vg find] SMEM reseeding requires an XG index. Provide XG index with -x." << endl;
         exit(1);
     }
@@ -363,18 +373,40 @@ int main_find(int argc, char** argv) {
         }
         nli.close();
     }
+    
+    // Now find the graph we want to operate on
+    // We fill this in if we have a HandleGraph implementation
+    HandleGraph* handle_graph = nullptr;
+    // We fill this in if it is also a PathHandleGraph implementation
+    PathHandleGraph* path_handle_graph = nullptr;
 
     // open RocksDB index
     unique_ptr<Index> vindex;
     if (!db_name.empty()) {
         vindex = unique_ptr<Index>(new Index());
         vindex->open_read_only(db_name);
+        
+        // TODO: RocksDB doesn't implement HandleGraph at all
     }
-
+    
     xg::XG xindex;
     if (!xg_name.empty()) {
         ifstream in(xg_name.c_str());
         xindex.load(in);
+        
+        // This is a HandleGraph and a PathHandleGraph
+        handle_graph = &xindex;
+        path_handle_graph = &xindex;
+    }
+    
+    unique_ptr<IndexedVG> indexed_vg;
+    if (!sorted_vg_name.empty()) {
+        // Load the sorted, indexed VG we were given
+        indexed_vg = unique_ptr<IndexedVG>(new IndexedVG(sorted_vg_name));
+        
+        // This is a HandleGraph
+        handle_graph = indexed_vg.get();
+        // TODO: IndexedVG needs to implement PathHandleGraph
     }
     
     unique_ptr<GAMIndex> gam_index;
@@ -414,6 +446,8 @@ int main_find(int argc, char** argv) {
     }
 
     if (!aln_on_id_range.empty()) {
+        // Find alignments touching an ID range
+    
         // Parse the range
         vector<string> parts = split_delims(aln_on_id_range, ":");
         if (parts.size() == 1) {
@@ -506,8 +540,9 @@ int main_find(int argc, char** argv) {
         
         
     }
-
+    
     if (!xg_name.empty()) {
+        // TODO: This all needs to be redone in terms of a HandleGraph or PathHandleGraph
         if (!node_ids.empty() && path_name.empty() && !pairwise_distance) {
             // get the context of the node
             vector<Graph> graphs;
