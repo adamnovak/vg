@@ -215,6 +215,16 @@ auto StreamIndexBase::used_bins_of_range(id_t min_id, id_t max_id, const functio
     return bins_by_id_prefix.traverse_in_order(id_to_prefix(min_id), id_to_prefix(max_id), iteratee);
 }
     
+auto StreamIndexBase::longest_common_prefix(id_t a, id_t b) -> size_t {
+
+    // Make a mask where identical bits are 0
+    auto mask = a ^ b;
+    // Count the identical bits (count unset leading bits) with a compiler builtin
+    size_t identical_bits = __builtin_clzll(mask);
+    
+    return identical_bits;
+}
+    
 auto StreamIndexBase::common_bin(id_t a, id_t b) -> bin_t {
     // Convert to unsigned numbers
     bin_t a_bin = a;
@@ -258,13 +268,7 @@ auto StreamIndexBase::window_of_id(id_t id) -> window_t  {
 
 auto StreamIndexBase::add_group(id_t min_id, id_t max_id, int64_t virtual_start, int64_t virtual_past_end) -> void {
     
-    if (min_id < last_group_min_id) {
-        // Someone is trying to index an unsorted GAM.
-        // This is probably user error, so complain appropriately:
-        cerr << "error [vg::GAMIndex]: GAM data being indexed is not sorted. Sort with vg gamsort." << endl;
-        exit(1);
-    }
-    last_group_min_id = min_id;
+    // We don't check min ID ordering because we are also used to index ID subranges for multi-binning
     
     // Find the bin for the run
     bin_t bin = common_bin(min_id, max_id);
@@ -308,6 +312,84 @@ auto StreamIndexBase::add_group(id_t min_id, id_t max_id, int64_t virtual_start,
 #endif
         }
     }
+}
+
+auto StreamIndexBase::add_group(vector<id_t> all_used_ids, int64_t virtual_start, int64_t virtual_past_end, size_t bin_split_depth) -> void {
+    // We decide whether to break up the IDs across multiple windows.
+    
+    // First we find the min and max IDs, and the area of the bin they belong to, in node IDs
+    auto min_and_max = minmax_element(all_used_ids.begin(), all_used_ids.end());
+    auto min_it = min_and_max.first;
+    auto max_it = min_and_max.second;
+    
+    if (*min_it == *max_it) {
+        // If it's just one thing, just do that one range
+        cerr << "Add single-node group" << endl;
+        add_group(*min_it, *max_it, virtual_start, virtual_past_end);
+        return;
+    }
+    
+    if (bin_split_depth == 0) {
+        cerr << "Add leaf group" << endl;
+        add_group(*min_it, *max_it, virtual_start, virtual_past_end);
+        return;
+    }
+    
+    // Then we bucket the IDs in half on the highest differing bit
+    size_t top_prefix_length = longest_common_prefix(*min_it, *max_it);
+    
+    cerr << "Observed group touching IDs " << *min_it << " - " << *max_it
+        << " with top prefix length " << top_prefix_length << " bits" << endl;
+    
+    // We know it can't be the whole 64 bits because min != max
+    
+    // We will bucket on the first differing bit
+    vector<id_t> bucket[2];
+    
+    // Get ahold of a high bit mask
+    uint64_t HIGH_BIT = 0x8000000000000000ULL;
+    
+    for(auto& id : all_used_ids) {
+        uint64_t unsigned_id = id;
+        // Shift the uncommon bit up to the high position
+        unsigned_id = unsigned_id << top_prefix_length;
+        // Put the ID in the right bucket
+        bucket[unsigned_id >= HIGH_BIT].push_back(id);
+    }
+    
+    cerr << "Child buckets have sizes " << bucket[0].size() << " and " << bucket[1].size() << endl;
+    
+    // And we work out the gained bits of newly-common prefix in each bucket
+    vector<size_t> gained_bits;
+    for (auto i : {0, 1}) {
+        auto bucket_min_and_max = minmax_element(bucket[i].begin(), bucket[i].end());
+        auto bucket_prefix_length = longest_common_prefix(*bucket_min_and_max.first, *bucket_min_and_max.second);
+        cerr << "Child bucket " << *bucket_min_and_max.first << " - " << *bucket_min_and_max.second << endl;
+        gained_bits.push_back(bucket_prefix_length - top_prefix_length);
+    }
+    
+    cerr << "Child buckets gained " << gained_bits[0] << " and " << gained_bits[1] << " common bits" << endl;
+    
+    // Now if we split any bin at all, we will gain one bit in each child. We
+    // only care if we gain more than one bit in a child, because then if we
+    // split and query both sides, we're querying less ID space overall.
+    
+    if (*max_element(gained_bits.begin(), gained_bits.end()) >= 2) {
+        // As a first approximation, accept the split if we gain at least 2 bits in any child
+        // Recurse on the children in order
+        for (auto i : {0, 1}) {
+            cerr << "Recurse on bucket " << i << endl;
+            add_group(bucket[i], virtual_start, virtual_past_end, bin_split_depth - 1);
+        }
+    } else {
+        // We shouldn't actually add to the two child bins.
+        // Add as a single overall range
+        cerr << "Add group at this level" << endl;
+        add_group(*min_it, *max_it, virtual_start, virtual_past_end);
+    }
+    
+    
+    
 }
 
 auto StreamIndexBase::find(id_t node_id) const -> vector<pair<int64_t, int64_t>> {
@@ -699,6 +781,8 @@ auto StreamIndexBase::load(istream& from) -> void {
     default:
         throw std::runtime_error("Unimplemented stream index version " + to_string(input_version));
     }
+    
+    report();
     
 }
 

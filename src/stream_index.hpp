@@ -276,18 +276,6 @@ public:
     /// scanned.
     void find(id_t min_node, id_t max_node, const function<bool(int64_t, int64_t)> scan_callback) const;
     
-    /// Find all the ranges of runs of virtual offsets to check for reads
-    /// visiting any of the given inclusive node ID ranges. Relies on a
-    /// scanning callback, which will be called repeatedly with the start and
-    /// past-the-end virtual offsets of runs which may contain groups touching
-    /// the given node ID ranges. When called, the callback should scan the run
-    /// and return either true if it wants the next run, or false if it
-    /// encountered a group with an out-of-range start and wants to stop
-    /// iteration. Runs will be emitted in order, and truncated on the left to
-    /// either the appropriate lower bound from the linear index, or the
-    /// past-the-end of the previous run scanned.
-    void find(vector<pair<id_t, id_t>> node_ranges, const function<bool(int64_t, int64_t)> scan_callback) const;
-    
     /// Iterate over ranges of virtual offsets from the end of the file to the
     /// start. The ranges to *not* necessarily correspond to runs. The ending
     /// VO of the first range iterated may be numeric_limits<int64_t>::max().
@@ -302,6 +290,14 @@ public:
     /// offset order.
     void add_group(id_t min_id, id_t max_id, int64_t virtual_start, int64_t virtual_past_end);
     
+    /// Add a group into the index, based on all the IDs it uses. Used IDs may
+    /// repeat. Must be called for all groups in virtual offset order. May add
+    /// a group to multiple bins if it covers multiple distinct, compact
+    /// regions in node ID space. The passed vector must be nonempty. If it
+    /// would otherwise be empty it should contain the sentinel 0.
+    /// Splits bins recursively in half up to bin_split_depth times.
+    void add_group(vector<id_t> all_used_ids, int64_t virtual_start, int64_t virtual_past_end, size_t bin_split_depth = 3);
+    
     ///////////////////
     // Lowest-level functions for thinking about bins and windows.
     ///////////////////
@@ -312,11 +308,18 @@ public:
     /// Get the given ID as a bit string
     static BitString id_to_prefix(id_t id);
     
+    /// Get the number of bits in the longest common prefix of two numbers.
+    /// This is also the first differing bit.
+    static size_t longest_common_prefix(id_t a, id_t b);
+    
     /// Get the most specific bin that contains both of the given node IDs.
     static bin_t common_bin(id_t a, id_t b);
     
     /// Get the bounding IDs of a bin
     static pair<id_t, id_t> bin_id_range(bin_t bin);
+    
+    /// Get the size of a bin in IDs
+    static id_t bin_size(bin_t bin);
     
     /// Get the linear index window that the given node ID falls in. The window
     /// range for a group is its min nodes' window through its max node's
@@ -352,6 +355,7 @@ protected:
     
     /// What was the minimum node ID of the last group added?
     /// If this isn't strictly increasing, we're trying to index data that is not sorted.
+    /// TODO: Restore this functionality
     id_t last_group_min_id = numeric_limits<id_t>::min();
     
     /// Return true if the given ID is in any of the sorted, coalesced, inclusive ranges in the vector, and false otherwise.
@@ -909,9 +913,9 @@ auto StreamIndex<Message>::find(cursor_t& cursor, const vector<pair<id_t, id_t>>
         
     }
     
-#ifdef debug
+//#ifdef debug
     cerr << "Total index accuracy: " << total_hits << " matching items and " << total_misses << " irrelevant ones" << endl;
-#endif
+//#endif
 }
 
 template<typename Message>
@@ -953,27 +957,23 @@ auto StreamIndex<Message>::index(cursor_t& cursor) -> void {
 
 template<typename Message>
 auto StreamIndex<Message>::add_group(const vector<Message>& msgs, int64_t virtual_start, int64_t virtual_past_end) -> void {
-    // Find the min and max ID visited by any of the messages
-    id_t min_id = numeric_limits<id_t>::max();
-    id_t max_id = numeric_limits<id_t>::min();
-    
-    
+    // Collect all the IDs
+    vector<id_t> ids;
     
     for (auto& msg : msgs) {
         // For each message
         for_each_id(msg, [&](const id_t& found) {
             // For each ID touched by the message
             
-            // Min and max in the ID, keeping 0 to represent no mappings.
-            min_id = min(min_id, found);
-            max_id = max(max_id, found);
+            ids.push_back(found);
             
             // Don't stop early
             return true;
         });
     }
     
-    add_group(min_id, max_id, virtual_start, virtual_past_end);
+    // Add with all the IDs, so we can automatically demote to multiple bins if needed
+    add_group(ids, virtual_start, virtual_past_end);
 }
 
 template<typename Message>
