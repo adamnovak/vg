@@ -11,6 +11,10 @@
 #include <cerrno>
 #include <cstring>
 
+#include <algorithm>
+
+#include <unistd.h>
+
 /**
  * Each allocation we do has one of these headers to represent it. The header
  * ends immediately before the allocation starts, and contains the number of
@@ -118,31 +122,30 @@ void* realloc(void* ptr, size_t size) {
     // Trivial implementation: allocate, copy always, free
     size_t old_size = header.bytes_after;
     void* new_location = malloc(size);
-    memcpy(new_location, ptr, old_size);
+    memcpy(new_location, ptr, std::min(size, old_size));
     free(ptr);
     
     return new_location;
 }
 
-/// Allocate memory aligned to alignment, which is a power of 2 and a multiple of sizeof(void*)
-/// Store result at memptr. Return 0 on success, or ENOMEM or EINVAL on failure.
-int posix_memalign(void** memptr, size_t alignment, size_t size) {
+/// Allocate memory aligned to alignment, which is a power of 2 but maybe not a multiple of sizeof(void*)
+void* memalign(size_t alignment, size_t size) {
     
     // How big do we need to have to be able to guarantee correct alignment?
     size_t sufficiently_big = size + alignment;
     // Get it
-    *memptr = malloc(sufficiently_big);
+    void* allocated = malloc(sufficiently_big);
     
-    if (*memptr == nullptr) {
+    if (allocated == nullptr) {
         // No memory left
-        return ENOMEM;
+        return nullptr;
     }
     
-    size_t address = (size_t) *memptr;
+    size_t address = (size_t) allocated;
     
     if (address % alignment == 0) {
         // Already aligned
-        return 0;
+        return allocated;
     }
     
     // Otherwise, fix it up. Work out the address we will ship out
@@ -153,40 +156,53 @@ int posix_memalign(void** memptr, size_t alignment, size_t size) {
     AllocationHeader& new_header = *((AllocationHeader*) new_handle_address - 1);
     
     // Save the old header to stack
-    AllocationHeader old_header = *(((AllocationHeader*) *memptr) - 1);
+    AllocationHeader old_header = *(((AllocationHeader*) allocated) - 1);
     
     // Account for the shift and write the new header.
     new_header.bytes_before = old_header.bytes_before + (aligned_address - address);
     new_header.bytes_after = old_header.bytes_after - (aligned_address - address);
     
     // Send out the address right after the now-shifted header.
-    *memptr = new_handle_address;
+    return new_handle_address;
+}
+
+/// Allocate memory aligned to alignment, which is a power of 2 and a multiple of sizeof(void*)
+/// Store result at memptr. Return 0 on success, or ENOMEM or EINVAL on failure.
+int posix_memalign(void** memptr, size_t alignment, size_t size) {
     
-    // It worked.
+    *memptr = memalign(alignment, size);
+    
+    if (*memptr == nullptr) {
+        return ENOMEM;
+    }
+    
     return 0;
+    
 }
 
 
 /// Allocate memory aligned to alignment, which is a power of 2 but maybe not a
-/// multiple of sizeof(void*), and wherer size is a multiple of alignment
+/// multiple of sizeof(void*), and where size is a multiple of alignment
 void* aligned_alloc(size_t alignment, size_t size) {
-    return nullptr;
+    return memalign(alignment, size);
 }
 
 /// Allocate memory aligned to page size.
 /// Same as memalign(sysconf(_SC_PAGESIZE),size)
 void* valloc(size_t size) {
-    return nullptr;
-}
-
-/// Allocate memory aligned to alignment, which is a power of 2 but maybe not a multiple of sizeof(void*)
-void* memalign(size_t alignment, size_t size) {
-    return nullptr;
+    return memalign(sysconf(_SC_PAGESIZE), size);
 }
 
 /// Same as valloc, but rounds size up to next multiple of page size
 void* pvalloc(size_t size) {
-    return nullptr;
+    size_t page_size = sysconf(_SC_PAGESIZE);
+    
+    if (size % page_size != 0) {
+        // Round up to next multiple of page size
+        size = size - (size % page_size) + page_size;
+    }
+    
+    return valloc(size);
 }
     
 }
