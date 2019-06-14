@@ -138,8 +138,8 @@ ROCKSDB_LDFLAGS = $(shell grep PLATFORM_LDFLAGS deps/rocksdb/make_config.mk | cu
 # TODO: Why did this problem only begin to happen when libvw was added?
 STATIC_FLAGS=-static -static-libstdc++ -static-libgcc -Wl,--allow-multiple-definition 
 
-# These are put into libvg. Grab everything except main
-OBJ = $(filter-out $(OBJ_DIR)/main.o,$(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(wildcard $(SRC_DIR)/*.cpp)))
+# These are put into libvg. Grab everything except main and some configuration objects
+OBJ = $(filter-out $(OBJ_DIR)/main.o $(OBJ_DIR)/easy_allocator.o,$(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(wildcard $(SRC_DIR)/*.cpp)))
 # And all the algorithms
 ALGORITHMS_OBJ = $(patsubst $(ALGORITHMS_SRC_DIR)/%.cpp,$(ALGORITHMS_OBJ_DIR)/%.o,$(wildcard $(ALGORITHMS_SRC_DIR)/*.cpp))
 # And all the IO logic
@@ -255,8 +255,10 @@ LINK_DEPS =
 
 ifneq ($(shell uname -s),Darwin)
 	# Use jemalloc
-	LINK_DEPS += $(LIB_DIR)/libjemalloc.a
-	LD_LIB_FLAGS += -ljemalloc
+	#LINK_DEPS += $(LIB_DIR)/libjemalloc.a
+	#LD_LIB_FLAGS += -ljemalloc
+	
+	CONFIGURATION_OBJ += $(OBJ_DIR)/easy_allocator.o
 endif
 
 
