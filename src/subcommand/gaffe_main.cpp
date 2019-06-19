@@ -62,6 +62,7 @@ void help_gaffe(char** argv) {
     << "  -a, --max-alignments INT      align up to INT extensions [8]" << endl
     << "  -O, --no-chaining             disable seed chaining and all gapped alignment" << endl
     << "  -X, --xdrop                   use xdrop alignment for tails" << endl
+    << "  -A, --all-tails               align all available tails, instead of only some" << endl
     << "  -t, --threads INT             number of compute threads to use" << endl;
 }
 
@@ -132,12 +133,13 @@ int main_gaffe(int argc, char** argv) {
             {"score-fraction", required_argument, 0, 'F'},
             {"no-chaining", no_argument, 0, 'O'},
             {"xdrop", no_argument, 0, 'X'},
+            {"all-tails", no_argument, 0, 'A'},
             {"threads", required_argument, 0, 't'},
             {0, 0, 0, 0}
         };
 
         int option_index = 0;
-        c = getopt_long (argc, argv, "hx:H:m:s:d:pG:f:M:N:R:nc:C:F:e:a:OXt:",
+        c = getopt_long (argc, argv, "hx:H:m:s:d:pG:f:M:N:R:nc:C:F:e:a:OXAt:",
                          long_options, &option_index);
 
 
