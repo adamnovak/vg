@@ -15,15 +15,6 @@ using namespace structures;
 bool dijkstra(const HandleGraph* g, handle_t start,
               function<bool(const handle_t&, size_t)> reached_callback,
               bool traverse_leftward) {
-              
-    // Implement single-start search in terms of multi-start search
-    return dijkstra(g, unordered_set<handle_t>(start), reached_callback, traverse_leftward);
-              
-}
-
-bool dijkstra(const HandleGraph* g, unordered_set<handle_t> starts,
-              function<bool(const handle_t&, size_t)> reached_callback,
-              bool traverse_leftward) {
 
     // We keep a priority queue so we can visit the handle with the shortest
     // distance next. We put handles in here whenever we see them with shorter
@@ -47,11 +38,9 @@ bool dijkstra(const HandleGraph* g, unordered_set<handle_t> starts,
     });
     
     // We keep a current handle
-    handle_t current;
+    handle_t current = start;
     size_t distance = 0;
-    for (auto& start : starts) {
-        queue.push(make_pair(distance, start));
-    }
+    queue.push(make_pair(distance, start));
     
     while (!queue.empty()) {
         // While there are things in the queue, get the first.
@@ -72,10 +61,10 @@ bool dijkstra(const HandleGraph* g, unordered_set<handle_t> starts,
         // Remember that we made it here.
         visited.emplace(current);
         
-        if (!starts.count(current)) {
+        if (current != start) {
             // Up the distance with the node's length. We don't do this for the
-            // start handles because we want to count distance from the *end* of
-            // the start handles unless directed otherwise.
+            // start handle because we want to count distance from the *end* of
+            // the start handle unless directed otherwise.
             distance += g->get_length(current);
         }
             
