@@ -86,8 +86,10 @@ int main_gaffe(int argc, char** argv) {
     bool progress = false;
     // Should we try chaining or just give up if we can't find a full length gapless alignment?
     bool do_chaining = true;
-    // Whould we use the xdrop aligner for aligning tails?
+    // Should we use the xdrop aligner for aligning tails?
     bool use_xdrop_for_tails = false;
+    // Should we do every last tail alignment, or only the good ones?
+    bool do_all_tails = false;
     // What GAMs should we realign?
     vector<string> gam_filenames;
     // What FASTQs should we align.
@@ -273,15 +275,18 @@ int main_gaffe(int argc, char** argv) {
                 use_xdrop_for_tails = true;
                 break;
                 
+            case 'A':
+                do_all_tails = true;
+                
             case 't':
-            {
-                int num_threads = parse<int>(optarg);
-                if (num_threads <= 0) {
-                    cerr << "error:[vg gaffe] Thread count (-t) set to " << num_threads << ", must set to a positive integer." << endl;
-                    exit(1);
+                {
+                    int num_threads = parse<int>(optarg);
+                    if (num_threads <= 0) {
+                        cerr << "error:[vg gaffe] Thread count (-t) set to " << num_threads << ", must set to a positive integer." << endl;
+                        exit(1);
+                    }
+                    threads_to_run.push_back(num_threads);
                 }
-                threads_to_run.push_back(num_threads);
-            }
                 break;
                 
             case 'h':
@@ -400,6 +405,11 @@ int main_gaffe(int argc, char** argv) {
         cerr << "--xdrop " << use_xdrop_for_tails << endl;
     }
     minimizer_mapper.use_xdrop_for_tails = use_xdrop_for_tails;
+    
+    if (progress) {
+        cerr << "--all-tails " << do_all_tails << endl;
+    }
+    minimizer_mapper.max_tail_extensions = numeric_limits<size_t>::max();
 
     minimizer_mapper.sample_name = sample_name;
     minimizer_mapper.read_group = read_group;

@@ -55,11 +55,22 @@ public:
     /// How many extended clusters should we align, max?
     size_t max_alignments = 8;
 
+    /// How many alignments should we produce, max, per read?
     size_t max_multimaps = 1;
+    /// What distance do we use for clustering?
     size_t distance_limit = 1000;
+    /// Should we do the gapless extension chaining and DP, or just leave reads
+    /// with no full-length gapless extension unmapped?
     bool do_chaining = true;
+    /// When aligning tails, past the first/last gapless extension, should we
+    /// use xdrop, or GSSW?
     bool use_xdrop_for_tails = false;
+    /// How many different gapless extensions' tails should we be willing to align, per read end?
+    /// We always align against all haplotype-consistent paths for a given gapless extension's tail.
+    size_t max_tail_extensions = 2;
+    /// What sample name should we tag our output reads with, if any?
     string sample_name;
+    /// What read group should we tag our output reads with, if any?
     string read_group;
 
 
