@@ -277,6 +277,7 @@ int main_gaffe(int argc, char** argv) {
                 
             case 'A':
                 do_all_tails = true;
+                break;
                 
             case 't':
                 {
