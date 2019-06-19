@@ -1507,26 +1507,135 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
         }
     }
     
-    // TODO: walk out left form the sources a certain distance with something
-    // other than Dijkstra, because we need a cut across the graph.
    
-    // Walk a bit further to try and find common ancestors
+    // Find the leftmost handles to walk right from to make haplotypes.
+    unoredred_set<handle_t> leftmost_handles;
     
-    // For all the common ancewstor nodes found after walking read length bases left
+    for (auto& source : source_handles) {
+        // Walk left from each source a certain distance. 
+        // We treat the sources independently, because they may be from
+        // different/not really overlapping parts of the cluster.
+        size_t upstream_distance = aln.sequence().size() * 2;
+        
+        // We need to find a cut across the graph.
+        // We can't use Dijkstra because it has no way to notify us when it hits the distance limit or a dead end.
+        // We will use the explore_gbwt method for now.
+            
+        // Start exploring right from the other strand
+        Position start_position = make_position(gbwt_graph.get_id(source),
+            !gbwt_graph.get_is_reverse(source), gbwt_graph.get_length(source));
+        
+        
+        explore_gbwt(start_position, upstream_distance,
+            [&](const ImmutablePath& path, const handle_t& visit) -> bool {
+                // Keep going on every visit
+                return true;
+            },
+            [&](const ImmutablePath& path) -> void {
+                // When we hit a dead end or the limit, keep the handle as a cut handle.
+                // Make sure to reverse the strand again.
+                hande_t cut_handle = gbwt_graph.get_handle(path.front().position().node_id(), !path.front().position().is_reverse());
+                leftmost_handles.insert(cut_handle);
+            });
+            
+    }
+        
+        
+    // Now we find all the Paths to map the read against.
+    vector<Path> target_paths;
+        
+    for (auto& cut_handle : leftmost_handles) {
+        // Then from each final node we reach for any source, walk the GBWT right
+        // by a larger distance, through the read and anything it could map to.
+        size_t downstream_distance = aln.sequence().size() * 5;
+        
+        // Explore riught on the same strand
+        Position cut_position = make_position(gbwt_graph.get_id(cut_handle),
+            bwt_graph.get_is_reverse(cut_handle), gbwt_graph.get_length(cut_handle));
+        
+        explore_gbwt(cut_position, downstream_distance,
+            [&](const ImmutablePath& path, const handle_t& visit) -> bool {
+                // Keep going on every visit
+                return true;
+            },
+            [&](const ImmutablePath& path) -> void {
+                // When we hit a dead end or the limit, turn the ImmutablePath into a Path to align against.
+                target_paths.emplace_back(to_path(path));
+            });
+        
+    }
     
-    // Walk right through the GBWT graph as far as the max we walked left to reach each node, plus the read length, plus the read length again
+    // Now look for the best alignment to any path.
+    // We set thid to ~-inf because we even want results with 0 score.
+    int64_t best_score = numeric_limits<int64_t>::min();
+    // we will store the winner in out's path, so set the rest of out's parameters.
     
-    // Extract all those haplotype paths
+    for (auto& path : target_paths) {
+        // For each path, make sure it isn't empty.
+        assert(path.mapping_size() > 0);
+
+        // Make a subgraph.
+        // TODO: don't copy the path
+        PathSubgraph subgraph(&gbwt_graph, path);
+        
+        // Do global alignment to the path subgraph
+        Alignment path_alignment;
+        path_alignment.set_sequence(aln.sequence());
+        
+#ifdef debug
+        cerr << "Align " << pb2json(path_alignment) << " local";
+
+#ifdef debug_dump_graph
+        cerr << " vs:" << endl;
+        cerr << "Defining path: " << pb2json(path) << endl;
+        subgraph.for_each_handle([&](const handle_t& here) {
+            cerr << subgraph.get_id(here) << " len " << subgraph.get_length(here)
+                << " (" << subgraph.get_sequence(here) << "): " << endl;
+            subgraph.follow_edges(here, true, [&](const handle_t& there) {
+                cerr << "\t" << subgraph.get_id(there) << " len " << subgraph.get_length(there)
+                    << " (" << subgraph.get_sequence(there) << ") ->" << endl;
+            });
+            subgraph.follow_edges(here, false, [&](const handle_t& there) {
+                cerr << "\t-> " << subgraph.get_id(there) << " len " << subgraph.get_length(there)
+                    << " (" << subgraph.get_sequence(there) << ")" << endl;
+            });
+        });
+#else
+        cerr << endl;
+#endif
+#endif
+
+        // Do a local alignment with traceback but no score matrix printing.
+        get_regular_aligner()->align(path_alignment, subgraph, true, false);
+        
+#ifdef debug
+        cerr << "\tScore: " << path_alignment.score() << endl;
+#endif
+            
+            if (path_alignment.score() > best_score) {
+                // This is a new best alignment. Translate from subgraph into base graph and keep it
+                *out.mutable_path() = subgraph.translate_down(path_alignment.path());
+                
+                // Preserve the identity and score too.
+                out.set_identity(path_alignment.identity());
+                out.set_score(path_alignment.score());
+#ifdef debug
+                cerr << "\tNew best: " << pb2json(path_alignment) << endl;
+#endif
+                
+                best_score = path_alignment.score();
+            }
+        }
+        
+    }
     
-    // Make PathGraphs
+    // Now the best alignment from any path is in out.
     
-    // Compute local alignments of the read to each of them
+    // Annotate it with how many paths we had to align it against.
+    set_annotation(out, "local_alignment_paths", (double)target_paths.size());
     
-    // Pick the best
+    // We're done!
     
-    // Translate back to backing graph
-    
-    // Output it
 }
 
 size_t MinimizerMapper::immutable_path_from_length(const ImmutablePath& path) {

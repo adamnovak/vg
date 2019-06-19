@@ -111,7 +111,8 @@ protected:
      * seeds, and produce an alignment into the given
      * output Alignment object.
      *
-     * Returns true if an alignment was generated and written to out.
+     * Returns true if an alignment was generated and path, identity, and score
+     * were written to out.
      *
      * Returns false if extension seems too complicated and we want to fall
      * back on an alternate local alignment method.
@@ -139,9 +140,11 @@ protected:
         size_t read_length) const;
         
     /**
-     * Work out all the local haplotypes around the given extended seeds, connected by the given paths, as
-     * linear path graphs, and find the best alignment of the whole read to any
-     * of them.
+     * Work out all the local haplotypes around the given extended seeds,
+     * connected by the given paths, as linear path graphs, and find the best
+     * alignment of the whole read to any of them.
+     *
+     * Writes the path, identity, and score for that alignment to out.
      */
     void align_to_local_haplotypes(const Alignment& aln, const vector<GaplessExtension>& extended_seeds,
         const unordered_map<size_t, unordered_map<size_t, vector<Path>>>& paths_between_seeds, Alignment& out) const;
@@ -160,6 +163,9 @@ protected:
     
     /**
      * Convert an ImmutablePath to a Path.
+     *
+     * Makes sure to interpret the ImmutablePath as having the rightmost entry
+     * at the front fo the ImmutableList.
      */
     static Path to_path(const ImmutablePath& path);
 
