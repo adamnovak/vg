@@ -12,6 +12,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <unordered_set>
 
 // Set this to track provenance of intermediate results
 //#define TRACK_PROVENANCE
@@ -397,7 +398,7 @@ void MinimizerMapper::map(Alignment& aln, AlignmentEmitter& alignment_emitter) {
                 // We don't actually need the read sequence for this, just the read length for longest gap computation.
                 // The paths in the seeds know the hit length.
                 // We assume all overlapping hits are exclusive.
-                unordered_map<size_t, unordered_map<size_t, vector<Path>>> paths_between_seeds = find_connecting_paths(extended_seeds,
+                unordered_map<size_t, unordered_map<size_t, vector<Path>>> paths_between_seeds = find_connecting_paths(extensions,
                     aln.sequence().size());
                 
                 // Do the chaining and compute an alignment into out.
@@ -780,136 +781,141 @@ bool MinimizerMapper::chain_extended_seeds(const Alignment& aln, const vector<Ga
         }
     }
 
-    for (auto& kv : paths_between_seeds[numeric_limits<size_t>::max()]) {
-        // For each source extended seed
-        const size_t& source = kv.first;
-        
-        // Grab the part of the read sequence that comes before it
-        string before_sequence = aln.sequence().substr(0, extended_seeds[source].core_interval.first); 
-        
-#ifdef debug
-        cerr << "There is a path into source extended seed " << source
-            << ": \"" << before_sequence << "\" against " << kv.second.size() << " haplotypes" << endl;
-#endif
-        
-        // Record that a source has this many incoming haplotypes to process.
-        tail_path_counts.push_back(kv.second.size());
-        // Against a sequence this long
-        tail_lengths.push_back(before_sequence.size());
-        
-        // We want the best alignment, to the base graph, done against any target path
-        Path best_path;
-        // And its score
-        int64_t best_score = numeric_limits<int64_t>::min();
-
-        // We can align it once per target path
-        for (auto& path : kv.second) {
-            // For each path we can take to get to the source
+    auto source_entry = paths_between_seeds.find(numeric_limits<size_t>::max());
+    if (source_entry != paths_between_seeds.end()) {
+        for (auto& kv : source_entry->second) {
+            // For each source extended seed
+            const size_t& source = kv.first;
             
-            if (path.mapping_size() == 0) {
-                // We might have extra read before where the graph starts. Handle leading insertions.
-                // We consider a pure softclip.
-                // We don't consider an empty sequence because if that were the case
-                // we would not have any paths_between_seeds entries for the dangling-left-sequence sentinel.
-                if (best_score < 0) {
-                    best_score = 0;
-                    best_path.clear_mapping();
-                    Mapping* m = best_path.add_mapping();
-                    Edit* e = m->add_edit();
-                    e->set_from_length(0);
-                    e->set_to_length(before_sequence.size());
-                    e->set_sequence(before_sequence);
-                    // Since the softclip consumes no graph, we place it on the node we are going to.
-                    *m->mutable_position() = extended_seeds[source].starting_position(gbwt_graph);
-                    
+            // Grab the part of the read sequence that comes before it
+            string before_sequence = aln.sequence().substr(0, extended_seeds[source].core_interval.first); 
+            
 #ifdef debug
-                    cerr << "New best alignment: " << pb2json(best_path) << endl;
+            cerr << "There is a path into source extended seed " << source
+                << ": \"" << before_sequence << "\" against " << kv.second.size() << " haplotypes" << endl;
 #endif
-                }
-            } else {
+            
+            // Record that a source has this many incoming haplotypes to process.
+            tail_path_counts.push_back(kv.second.size());
+            // Against a sequence this long
+            tail_lengths.push_back(before_sequence.size());
+            
+            // We want the best alignment, to the base graph, done against any target path
+            Path best_path;
+            // And its score
+            int64_t best_score = numeric_limits<int64_t>::min();
 
-                // Make a subgraph.
-                // TODO: don't copy the path
-                PathSubgraph subgraph(&gbwt_graph, path);
+            // We can align it once per target path
+            for (auto& path : kv.second) {
+                // For each path we can take to get to the source
                 
-                // Do right-pinned alignment to the path subgraph with GSSWAligner.
-                Alignment before_alignment;
-                before_alignment.set_sequence(before_sequence);
+                if (path.mapping_size() == 0) {
+                    // We might have extra read before where the graph starts. Handle leading insertions.
+                    // We consider a pure softclip.
+                    // We don't consider an empty sequence because if that were the case
+                    // we would not have any paths_between_seeds entries for the dangling-left-sequence sentinel.
+                    if (best_score < 0) {
+                        best_score = 0;
+                        best_path.clear_mapping();
+                        Mapping* m = best_path.add_mapping();
+                        Edit* e = m->add_edit();
+                        e->set_from_length(0);
+                        e->set_to_length(before_sequence.size());
+                        e->set_sequence(before_sequence);
+                        // Since the softclip consumes no graph, we place it on the node we are going to.
+                        *m->mutable_position() = extended_seeds[source].starting_position(gbwt_graph);
+                        
 #ifdef debug
-                cerr << "Align " << pb2json(before_alignment) << " pinned right";
+                        cerr << "New best alignment: " << pb2json(best_path) << endl;
+#endif
+                    }
+                } else {
+
+                    // Make a subgraph.
+                    // TODO: don't copy the path
+                    PathSubgraph subgraph(&gbwt_graph, path);
+                    
+                    // Do right-pinned alignment to the path subgraph with GSSWAligner.
+                    Alignment before_alignment;
+                    before_alignment.set_sequence(before_sequence);
+#ifdef debug
+                    cerr << "Align " << pb2json(before_alignment) << " pinned right";
 
 #ifdef debug_dump_graph
-                cerr << " vs:" << endl;
-                subgraph.for_each_handle([&](const handle_t& here) {
-                    cerr << subgraph.get_id(here) << " (" << subgraph.get_sequence(here) << "): " << endl;
-                    subgraph.follow_edges(here, true, [&](const handle_t& there) {
-                        cerr << "\t" << subgraph.get_id(there) << " (" << subgraph.get_sequence(there) << ") ->" << endl;
+                    cerr << " vs:" << endl;
+                    subgraph.for_each_handle([&](const handle_t& here) {
+                        cerr << subgraph.get_id(here) << " (" << subgraph.get_sequence(here) << "): " << endl;
+                        subgraph.follow_edges(here, true, [&](const handle_t& there) {
+                            cerr << "\t" << subgraph.get_id(there) << " (" << subgraph.get_sequence(there) << ") ->" << endl;
+                        });
+                        subgraph.follow_edges(here, false, [&](const handle_t& there) {
+                            cerr << "\t-> " << subgraph.get_id(there) << " (" << subgraph.get_sequence(there) << ")" << endl;
+                        });
                     });
-                    subgraph.follow_edges(here, false, [&](const handle_t& there) {
-                        cerr << "\t-> " << subgraph.get_id(there) << " (" << subgraph.get_sequence(there) << ")" << endl;
-                    });
-                });
-                cerr << "Path: " << pb2json(path) << endl;
+                    cerr << "Path: " << pb2json(path) << endl;
 #else
-                cerr << endl;
+                    cerr << endl;
 #endif
 #endif
-                
-                // Align, accounting for full length bonus
-                if (use_xdrop_for_tails) {
+                    
+                    // Align, accounting for full length bonus
+                    if (use_xdrop_for_tails) {
 #ifdef debug
-                    Alignment clone = before_alignment;
-                    get_regular_aligner()->align_pinned(clone, subgraph, subgraph.get_topological_order(), false);
+                        Alignment clone = before_alignment;
+                        get_regular_aligner()->align_pinned(clone, subgraph, subgraph.get_topological_order(), false);
 #endif
-                    get_regular_aligner()->get_xdrop()->align_pinned(before_alignment, subgraph, subgraph.get_topological_order(), false);
+                        get_regular_aligner()->get_xdrop()->align_pinned(before_alignment, subgraph,
+                            subgraph.get_topological_order(), false);
 #ifdef debug
-                    cerr << "Xdrop: " << pb2json(before_alignment) << endl;
-                    cerr << "Normal: " << pb2json(clone) << endl;
+                        cerr << "Xdrop: " << pb2json(before_alignment) << endl;
+                        cerr << "Normal: " << pb2json(clone) << endl;
 #endif
-                } else {
-                    get_regular_aligner()->align_pinned(before_alignment, subgraph, subgraph.get_topological_order(), false);
-                }
-                
-#ifdef debug
-                cerr << "\tScore: " << before_alignment.score() << endl;
-#endif
-                
-                // Record size of DP matrix filled
-                tail_dp_areas.push_back(before_sequence.size() * path_from_length(path));
-
-                if (before_alignment.score() > best_score) {
-                    // This is a new best alignment. Translate from subgraph into base graph and keep it
-                    best_path = subgraph.translate_down(before_alignment.path());
-                    best_score = before_alignment.score();
+                    } else {
+                        get_regular_aligner()->align_pinned(before_alignment, subgraph, subgraph.get_topological_order(), false);
+                    }
                     
 #ifdef debug
-                    cerr << "New best alignment against: " << pb2json(path) << " is " << pb2json(best_path) << " score " << best_score << endl;
+                    cerr << "\tScore: " << before_alignment.score() << endl;
 #endif
+                    
+                    // Record size of DP matrix filled
+                    tail_dp_areas.push_back(before_sequence.size() * path_from_length(path));
+
+                    if (before_alignment.score() > best_score) {
+                        // This is a new best alignment. Translate from subgraph into base graph and keep it
+                        best_path = subgraph.translate_down(before_alignment.path());
+                        best_score = before_alignment.score();
+                        
+#ifdef debug
+                        cerr << "New best alignment against: " << pb2json(path) << " is " << pb2json(best_path)
+                            << " score " << best_score << endl;
+#endif
+                    }
                 }
             }
-        }
         
-        // We really should have gotten something
-        assert(best_path.mapping_size() != 0);
+            // We really should have gotten something
+            assert(best_path.mapping_size() != 0);
 
-        // Put it in the MultipathAlignment
-        Subpath* s = mp.add_subpath();
-        *s->mutable_path() = std::move(best_path);
-        s->set_score(best_score);
-        
-        // And make the edge from it to the correct source
-        s->add_next(source);
-        
+            // Put it in the MultipathAlignment
+            Subpath* s = mp.add_subpath();
+            *s->mutable_path() = std::move(best_path);
+            s->set_score(best_score);
+            
+            // And make the edge from it to the correct source
+            s->add_next(source);
+            
 #ifdef debug
-        cerr << "Add leading tail " << (mp.subpath_size() - 1) << " -> " << source << endl;
+            cerr << "Add leading tail " << (mp.subpath_size() - 1) << " -> " << source << endl;
 #endif
-        
+            
 #ifdef debug
-        cerr << "Resulting source subpath: " << pb2json(*s) << endl;
+            cerr << "Resulting source subpath: " << pb2json(*s) << endl;
 #endif
-        
-        // And mark it as a start subpath
-        mp.add_start(mp.subpath_size() - 1);
+            
+            // And mark it as a start subpath
+            mp.add_start(mp.subpath_size() - 1);
+        }
     }
     
     // We must have somewhere to start.
@@ -1509,7 +1515,7 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
     
    
     // Find the leftmost handles to walk right from to make haplotypes.
-    unoredred_set<handle_t> leftmost_handles;
+    unordered_set<handle_t> leftmost_handles;
     
     for (auto& source : source_handles) {
         // Walk left from each source a certain distance. 
@@ -1534,7 +1540,7 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
             [&](const ImmutablePath& path) -> void {
                 // When we hit a dead end or the limit, keep the handle as a cut handle.
                 // Make sure to reverse the strand again.
-                hande_t cut_handle = gbwt_graph.get_handle(path.front().position().node_id(), !path.front().position().is_reverse());
+                handle_t cut_handle = gbwt_graph.get_handle(path.front().position().node_id(), !path.front().position().is_reverse());
                 leftmost_handles.insert(cut_handle);
             });
             
@@ -1551,7 +1557,7 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
         
         // Explore riught on the same strand
         Position cut_position = make_position(gbwt_graph.get_id(cut_handle),
-            bwt_graph.get_is_reverse(cut_handle), gbwt_graph.get_length(cut_handle));
+            gbwt_graph.get_is_reverse(cut_handle), gbwt_graph.get_length(cut_handle));
         
         explore_gbwt(cut_position, downstream_distance,
             [&](const ImmutablePath& path, const handle_t& visit) -> bool {
@@ -1612,21 +1618,19 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
         cerr << "\tScore: " << path_alignment.score() << endl;
 #endif
             
-            if (path_alignment.score() > best_score) {
-                // This is a new best alignment. Translate from subgraph into base graph and keep it
-                *out.mutable_path() = subgraph.translate_down(path_alignment.path());
-                
-                // Preserve the identity and score too.
-                out.set_identity(path_alignment.identity());
-                out.set_score(path_alignment.score());
+        if (path_alignment.score() > best_score) {
+            // This is a new best alignment. Translate from subgraph into base graph and keep it
+            *out.mutable_path() = subgraph.translate_down(path_alignment.path());
+            
+            // Preserve the identity and score too.
+            out.set_identity(path_alignment.identity());
+            out.set_score(path_alignment.score());
 #ifdef debug
-                cerr << "\tNew best: " << pb2json(path_alignment) << endl;
+            cerr << "\tNew best: " << pb2json(path_alignment) << endl;
 #endif
-                
-                best_score = path_alignment.score();
-            }
+            
+            best_score = path_alignment.score();
         }
-        
     }
     
     // Now the best alignment from any path is in out.
