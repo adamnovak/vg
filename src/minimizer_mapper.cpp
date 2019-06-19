@@ -392,14 +392,34 @@ void MinimizerMapper::map(Alignment& aln, AlignmentEmitter& alignment_emitter) {
 #ifdef TRACK_PROVENANCE
                 funnel.substage("chain");
 #endif
+
+                // Find the paths between pairs of extended seeds that agree with haplotypes.
+                // We don't actually need the read sequence for this, just the read length for longest gap computation.
+                // The paths in the seeds know the hit length.
+                // We assume all overlapping hits are exclusive.
+                unordered_map<size_t, unordered_map<size_t, vector<Path>>> paths_between_seeds = find_connecting_paths(extended_seeds,
+                    aln.sequence().size());
                 
                 // Do the chaining and compute an alignment into out.
-                chain_extended_seeds(aln, extensions, out);
+                bool extended = chain_extended_seeds(aln, extensions, paths_between_seeds, out);
                 
 #ifdef TRACK_PROVENANCE
                 // We're done chaining. Next alignment may not go through this substage.
                 funnel.substage_stop();
 #endif
+
+                if (!extended) {
+#ifdef TRACK_PROVENANCE
+                    funnel.substage("local");
+#endif
+
+                    // Too many tails. Just do a few whole-region DPs against overall haplotypes.
+                    align_to_local_haplotypes(aln, extensions, paths_between_seeds, out);
+                    
+#ifdef TRACK_PROVENANCE
+                    funnel.substage_stop();
+#endif
+                }
             } else {
                 // We would do chaining but it is disabled.
                 // Leave out unaligned
@@ -708,18 +728,30 @@ bool MinimizerMapper::score_is_significant(int score_estimate, int best_score, i
     return false;
 }
 
-void MinimizerMapper::chain_extended_seeds(const Alignment& aln, const vector<GaplessExtension>& extended_seeds, Alignment& out) const {
+bool MinimizerMapper::chain_extended_seeds(const Alignment& aln, const vector<GaplessExtension>& extended_seeds,
+    const unordered_map<size_t, unordered_map<size_t, vector<Path>>>& paths_between_seeds, Alignment& out) const {
 
 #ifdef debug
     cerr << "Trying again to chain " << extended_seeds.size() << " extended seeds" << endl;
 #endif
 
-    // Find the paths between pairs of extended seeds that agree with haplotypes.
-    // We don't actually need the read sequence for this, just the read length for longest gap computation.
-    // The paths in the seeds know the hit length.
-    // We assume all overlapping hits are exclusive.
-    unordered_map<size_t, unordered_map<size_t, vector<Path>>> paths_between_seeds = find_connecting_paths(extended_seeds,
-        aln.sequence().size());
+    // Sum up all the tails to see if this connectivity graph is sufficiently simple to actually do DP on.
+    size_t total_source_count = 0;
+    size_t total_sink_count = 0;
+    for (auto& kv : paths_between_seeds) {
+        if (kv.first == numeric_limits<size_t>::max()) {
+            // We found all the sources
+            total_source_count += kv.second.size();
+        } else {
+            // We may be a sink
+            total_sink_count += kv.second.count(numeric_limits<size_t>::max());
+        }
+    }
+    
+    if (total_source_count > max_tail_extensions || total_sink_count > max_tail_extensions) {
+        // There's too much DP to do here. We're better off doing just a few whole-read DPs against the GBWT paths.
+        return false;
+    }
         
     // We're going to record source and sink path count distributions, for debugging
     vector<double> tail_path_counts;
@@ -1176,6 +1208,9 @@ void MinimizerMapper::chain_extended_seeds(const Alignment& aln, const vector<Ga
     set_annotation(out, "tail_path_counts", tail_path_counts);
     set_annotation(out, "tail_lengths", tail_lengths);
     set_annotation(out, "tail_dp_areas", tail_dp_areas);
+    
+    // Report that we filled in out
+    return true;
 }
 
 unordered_map<size_t, unordered_map<size_t, vector<Path>>>
@@ -1433,6 +1468,65 @@ MinimizerMapper::find_connecting_paths(const vector<GaplessExtension>& extended_
     // Now this should be filled in with all the connectivity, so return.
     return to_return;
     
+}
+
+void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vector<GaplessExtension>& extended_seeds,
+    const unordered_map<size_t, unordered_map<size_t, vector<Path>>>& paths_between_seeds, Alignment& out) const {
+    
+    // Find all the sources again.
+    // Note that this includes even end-abutting anchors with no read tails.
+    vector<bool> is_source(true, extended_seeds.size());
+    for (auto& from_and_edges : paths_between_seeds) {
+        // For each place edges come from
+        if (from_and_edges.first == numeric_limits<size_t>::max()) {
+            // Edges from nowhere don't make you not a source
+            continue;
+        }
+        
+        for (auto& to_and_path : from_and_edges.second) {
+            // For each place an edge goes to
+            if (to_and_path.first == numeric_limits<size_t>::max()) {
+                // Edges to nowhere don't matter
+                continue;
+            }
+            
+            // It is not a source
+            is_source[to_and_path.first] = false;
+        }
+    }
+    
+    // Now find the handle to the left node of each source extension.
+    unordered_set<handle_t> source_handles;
+    for (size_t i = 0; i < is_source.size(); i++) {
+        if (is_source[i]) {
+            // This gapless extension is a source extension.
+            
+            // Find its fitst visit in the graph
+            // TODO: use a real accessor method here!
+            source_handles.insert(extended_seeds.at(i).path.at(0));
+        }
+    }
+    
+    // TODO: walk out left form the sources a certain distance with something
+    // other than Dijkstra, because we need a cut across the graph.
+   
+    // Walk a bit further to try and find common ancestors
+    
+    // For all the common ancewstor nodes found after walking read length bases left
+    
+    // Walk right through the GBWT graph as far as the max we walked left to reach each node, plus the read length, plus the read length again
+    
+    // Extract all those haplotype paths
+    
+    // Make PathGraphs
+    
+    // Compute local alignments of the read to each of them
+    
+    // Pick the best
+    
+    // Translate back to backing graph
+    
+    // Output it
 }
 
 size_t MinimizerMapper::immutable_path_from_length(const ImmutablePath& path) {

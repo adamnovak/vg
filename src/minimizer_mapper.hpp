@@ -107,10 +107,17 @@ protected:
     
     /**
      * Operating on the given input alignment, chain together the given
-     * extended perfect-match seeds and produce an alignment into the given
+     * extended perfect-match seeds, using the given paths between [from][to]
+     * seeds, and produce an alignment into the given
      * output Alignment object.
+     *
+     * Returns true if an alignment was generated and written to out.
+     *
+     * Returns false if extension seems too complicated and we want to fall
+     * back on an alternate local alignment method.
      */
-    void chain_extended_seeds(const Alignment& aln, const vector<GaplessExtension>& extended_seeds, Alignment& out) const; 
+    bool chain_extended_seeds(const Alignment& aln, const vector<GaplessExtension>& extended_seeds,
+        const unordered_map<size_t, unordered_map<size_t, vector<Path>>>& paths_between_seeds, Alignment& out) const;
     
     /**
      * Find for each pair of extended seeds all the haplotype-consistent graph
@@ -130,6 +137,14 @@ protected:
      */
     unordered_map<size_t, unordered_map<size_t, vector<Path>>> find_connecting_paths(const vector<GaplessExtension>& extended_seeds,
         size_t read_length) const;
+        
+    /**
+     * Work out all the local haplotypes around the given extended seeds, connected by the given paths, as
+     * linear path graphs, and find the best alignment of the whole read to any
+     * of them.
+     */
+    void align_to_local_haplotypes(const Alignment& aln, const vector<GaplessExtension>& extended_seeds,
+        const unordered_map<size_t, unordered_map<size_t, vector<Path>>>& paths_between_seeds, Alignment& out) const;
         
     /// We define a type for shared-tail lists of Mappings, to avoid constantly
     /// copying Path objects.
