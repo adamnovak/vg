@@ -748,44 +748,20 @@ void MinimizerMapper::chain_extended_seeds(const Alignment& aln, const vector<Ga
         }
     }
 
-    // Find the top n source extensions with shortest tails.
-    // This holds length in the read, and destination extension number.
-    // We will partially sort and extract the top n, then do all possible paths for that tail.
-    vector<pair<size_t, size_t>> source_tails;
-    source_tails.reserve(paths_between_seeds[numeric_limits<size_t>::max()].size());
-    
     for (auto& kv : paths_between_seeds[numeric_limits<size_t>::max()]) {
         // For each source extended seed
         const size_t& source = kv.first;
         
-        // And its tail length
-        size_t tail_length = extended_seeds[source].core_interval.first;
-        
-#ifdef debug
-        cerr << "There is a path into source extended seed " << source
-            << ": " << tail_length << " bp against " << kv.second.size() << " haplotypes" << endl;
-#endif
-
-        source_tails.emplace_back(tail_length, source);
-    }
-    
-    if (max_tail_extensions < source_tails.size()) {
-        // Pick only the top n and put them first.
-        std::partial_sort(source_tails.begin(), source_tails.begin() + max_tail_extensions, source_tails.end());
-    }
-    
-    for (size_t i = 0; i < max_tail_extensions && i < source_tails.size(); i++) {
-        // For each source that makes the cut
-        const size_t& source = source_tails[i].second;
-        
-        // Find its possible paths
-        auto& paths = paths_between_seeds[numeric_limits<size_t>::max()][source];
-        
         // Grab the part of the read sequence that comes before it
         string before_sequence = aln.sequence().substr(0, extended_seeds[source].core_interval.first); 
         
+#ifdef debug
+        cerr << "There is a path into source extended seed " << source
+            << ": \"" << before_sequence << "\" against " << kv.second.size() << " haplotypes" << endl;
+#endif
+        
         // Record that a source has this many incoming haplotypes to process.
-        tail_path_counts.push_back(paths.size());
+        tail_path_counts.push_back(kv.second.size());
         // Against a sequence this long
         tail_lengths.push_back(before_sequence.size());
         
@@ -795,7 +771,7 @@ void MinimizerMapper::chain_extended_seeds(const Alignment& aln, const vector<Ga
         int64_t best_score = numeric_limits<int64_t>::min();
 
         // We can align it once per target path
-        for (auto& path : paths) {
+        for (auto& path : kv.second) {
             // For each path we can take to get to the source
             
             if (path.mapping_size() == 0) {
