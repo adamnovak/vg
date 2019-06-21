@@ -748,6 +748,11 @@ bool MinimizerMapper::chain_extended_seeds(const Alignment& aln, const vector<Ga
             total_sink_count += kv.second.count(numeric_limits<size_t>::max());
         }
     }
+
+#ifdef debug
+    cerr << "Identified " << total_source_count << "/" << max_tail_extensions << " sources and "
+        << total_sink_count << "/" << max_tail_extensions << " sinks in reachability graph" << endl;
+#endif
     
     if (total_source_count > max_tail_extensions || total_sink_count > max_tail_extensions) {
         // There's too much DP to do here. We're better off doing just a few whole-read DPs against the GBWT paths.

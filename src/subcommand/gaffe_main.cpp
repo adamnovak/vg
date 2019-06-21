@@ -410,7 +410,9 @@ int main_gaffe(int argc, char** argv) {
     if (progress) {
         cerr << "--all-tails " << do_all_tails << endl;
     }
-    minimizer_mapper.max_tail_extensions = numeric_limits<size_t>::max();
+    if (do_all_tails) {
+        minimizer_mapper.max_tail_extensions = numeric_limits<size_t>::max();
+    }
 
     minimizer_mapper.sample_name = sample_name;
     minimizer_mapper.read_group = read_group;
