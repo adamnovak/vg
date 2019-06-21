@@ -1484,9 +1484,10 @@ MinimizerMapper::find_connecting_paths(const vector<GaplessExtension>& extended_
 void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vector<GaplessExtension>& extended_seeds,
     const unordered_map<size_t, unordered_map<size_t, vector<Path>>>& paths_between_seeds, Alignment& out) const {
     
-    // Find all the sources again.
-    // Note that this includes even end-abutting anchors with no read tails.
-    vector<bool> is_source(true, extended_seeds.size());
+    // First identify all the source extensions.
+    // We don't care about other ways to escape.
+    // TODO: should we?
+    vector<bool> is_source(extended_seeds.size(), true);
     for (auto& from_and_edges : paths_between_seeds) {
         // For each place edges come from
         if (from_and_edges.first == numeric_limits<size_t>::max()) {
@@ -1501,32 +1502,84 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
                 continue;
             }
             
-            // It is not a source
-            is_source[to_and_path.first] = false;
-        }
-    }
-    
-    // Now find the handle to the left node of each source extension.
-    unordered_set<handle_t> source_handles;
-    for (size_t i = 0; i < is_source.size(); i++) {
-        if (is_source[i]) {
-            // This gapless extension is a source extension.
+#ifdef debug
+            cerr << "Found connection " << from_and_edges.first << " -> " << to_and_path.first << endl;
+#endif
             
-            // Find its fitst visit in the graph
-            // TODO: use a real accessor method here!
-            source_handles.insert(extended_seeds.at(i).path.at(0));
+            // It is not a source
+            is_source.at(to_and_path.first) = false;
         }
     }
     
-   
-    // Find the leftmost handles to walk right from to make haplotypes.
-    unordered_set<handle_t> leftmost_handles;
+    // OK, now we need to work out what handles to walk left from and how far to go
+    unordered_map<handle_t, size_t> source_walks;
     
-    for (auto& source : source_handles) {
+    for (size_t i = 0; i < is_source.size(); i++) {
+        if (!is_source[i]) {
+            continue;
+        }
+        
+        // For each source extension
+        
+        // Work out its starting Position.
+        Position core_start = extended_seeds.at(i).starting_position(gbwt_graph);
+        
+        // Work out how many bases we were planning to look left in the left tail.
+        // TODO: make sure this really corresponds to the core starting Position.
+        size_t core_extend_distance = 0;
+        if (paths_between_seeds.count(numeric_limits<size_t>::max()) && paths_between_seeds.at(numeric_limits<size_t>::max()).count(i)) {
+            // There are paths from nowhere to here
+            for (auto& path : paths_between_seeds.at(numeric_limits<size_t>::max()).at(i)) {
+                 // So use the max length of all of them.
+                 core_extend_distance = max(core_extend_distance, (size_t) path_from_length(path));
+            }
+        }
+        
+        // Decide that we need a walk x bases from the left end of the starting handle.
+        size_t handle_extend_distance = core_extend_distance;
+        if (core_start.offset() < handle_extend_distance) {
+            // We don't need to walk any distance from the core to the end of the node.
+            handle_extend_distance -= core_start.offset();
+        }
+        
+        // Find the source handle
+        // TODO: don't go to Position and back to handle.
+        handle_t source_handle = gbwt_graph.get_handle(core_start.node_id(), core_start.is_reverse());
+        
+        // Max in the distance for how far to go from this handle.
+        source_walks[source_handle] = max(source_walks[source_handle], handle_extend_distance);
+    
+#ifdef debug
+        cerr << "Found source extension " << i << " needing walk of "
+            << handle_extend_distance << " from handle for node " << gbwt_graph.get_id(source_handle) << endl;
+#endif
+        
+    }
+    
+    
+#ifdef debug
+        cerr << "Source handle count: " << source_walks.size() << endl;
+#endif
+    
+    // Find the leftmost handles to walk right from to make haplotypes, and the distance to walk down from each.
+    unordered_map<handle_t, size_t> walkbacks;
+    
+    // Remember each handle that we saw along a walk, except the end handle.
+    // If we see one of these again, we know we already have it covered, and we need to maybe lengthen a walkback elsewhere.
+    unordered_map<handle_t, pair<handle_t, size_t>> walk_back_redirects;
+    
+    // Remember all the walks we did
+    vector<double> haplotype_upstream_walks;
+    
+    for (auto& source_and_distance : source_walks) {
         // Walk left from each source a certain distance. 
         // We treat the sources independently, because they may be from
         // different/not really overlapping parts of the cluster.
-        size_t upstream_distance = aln.sequence().size() * 2;
+        auto& source = source_and_distance.first;
+        // Make sure to account for source node length when walking.
+        size_t upstream_distance = source_and_distance.second;
+        
+        haplotype_upstream_walks.push_back(upstream_distance);
         
         // We need to find a cut across the graph.
         // We can't use Dijkstra because it has no way to notify us when it hits the distance limit or a dead end.
@@ -1535,7 +1588,10 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
         // Start exploring right from the other strand
         Position start_position = make_position(gbwt_graph.get_id(source),
             !gbwt_graph.get_is_reverse(source), gbwt_graph.get_length(source));
-        
+            
+#ifdef debug
+        cerr << "Do GBWT walk up " << upstream_distance << " bases from " << pb2json(start_position) << endl;
+#endif
         
         explore_gbwt(start_position, upstream_distance,
             [&](const ImmutablePath& path, const handle_t& visit) -> bool {
@@ -1543,26 +1599,125 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
                 return true;
             },
             [&](const ImmutablePath& path) -> void {
-                // When we hit a dead end or the limit, keep the handle as a cut handle.
+                // When we hit a dead end or the limit, keep the handle as a walkback start.
                 // Make sure to reverse the strand again.
-                handle_t cut_handle = gbwt_graph.get_handle(path.front().position().node_id(), !path.front().position().is_reverse());
-                leftmost_handles.insert(cut_handle);
+                handle_t walk_back_from = gbwt_graph.get_handle(path.front().position().node_id(), !path.front().position().is_reverse());
+                
+                // Evaluate chaining redirects.
+                // TODO: use some much better algorithm
+                handle_t redirect_to = walk_back_from;
+                size_t redirect_extra_distance = 0;
+                
+                while(walk_back_redirects.count(redirect_to)) {
+                    // We already covered this handle in a prior walk back.
+                    // Add any length for the walk back, following the redirect.
+                    auto& to_and_dist = walk_back_redirects[walk_back_from];
+                    redirect_to = to_and_dist.first;
+                    redirect_extra_distance += to_and_dist.second;
+                }
+                
+                if (redirect_to != walk_back_from) {
+                    // We got redirected.
+                    walkbacks[redirect_to] = max(walkbacks[redirect_to],
+                        redirect_extra_distance + upstream_distance + aln.sequence().size() * 2);
+                        
+#ifdef debug
+                    cerr << "Walk back from " << gbwt_graph.get_id(walk_back_from)
+                        << " is subsumed by longer walk back from " << gbwt_graph.get_id(redirect_to) << endl;
+#endif
+                } else {
+                    // We need to walk back from here at least the distance we walked, plus
+                    // the read length, plus something for the max detectable gap
+                    // on the other end.
+                    // TODO: be more conservative here
+                    size_t walkback_distance = upstream_distance + aln.sequence().size() * 2;
+                
+#ifdef debug
+                    if (walkbacks.count(walk_back_from)) {
+                        if (walkback_distance > walkbacks[walk_back_from]) {
+                            cerr << "Walk back from " << gbwt_graph.get_id(walk_back_from)
+                                << " is new longest" << endl;
+                        } else {
+                            cerr << "Walk back from " << gbwt_graph.get_id(walk_back_from)
+                                << " is shorter than previous" << endl;
+                        }
+                    } else {
+                        cerr << "Walk back from " << gbwt_graph.get_id(walk_back_from)
+                            << " is novel" << endl;
+                    }
+#endif
+                
+                    // Max it in with anything else that reached this handle.
+                    walkbacks[walk_back_from] = max(walkbacks[walk_back_from], walkback_distance);
+                    
+                    // Now subsume anything we reached previously that we walked further back than.
+                    // We need to track the distance along the path we scanned.
+                    size_t walked_distance = 0;
+                    bool first = true;
+                    for (auto& mapping : path) {
+                        walked_distance += mapping_from_length(mapping);
+                    
+                        if (first) {
+                            first = false;
+                            continue;
+                        }
+                        
+                        // For every mapping in the path after that one
+                        // Get the handle
+                        handle_t walk_back_via = gbwt_graph.get_handle(mapping.position().node_id(), !mapping.position().is_reverse());
+                        
+#ifdef debug
+                        cerr << "\tvisits " << gbwt_graph.get_id(walk_back_via) << endl;
+#endif
+                        
+                        if (walk_back_via == walk_back_from) {
+                            continue;
+                        }
+                        
+                        if (walkbacks.count(walk_back_via)) {
+                            // We need to subsume this
+                            
+#ifdef debug
+                            cerr << "\t\tsubsumes walk from " << gbwt_graph.get_id(walk_back_via) << endl;
+#endif
+                            
+                            walkbacks[walk_back_from] = max(walkbacks[walk_back_from], walkbacks[walk_back_via]);
+                            walkbacks.erase(walk_back_via);
+                        }
+                        
+                        if (!walk_back_redirects.count(walk_back_via) || walked_distance > walk_back_redirects[walk_back_via].second) {
+                            // Use this new or more distant redirect if anything ends on this place we also cover.
+                            walk_back_redirects[walk_back_via] = make_pair(walk_back_from, walked_distance);
+                            // We should never create a redirect loop because we only create redirects when walk_back_from didn't redirect.
+                            // And we never create redirects when walk_back_via == walk_back_from.
+                        }
+                    }
+                }
             });
-            
     }
         
         
     // Now we find all the Paths to map the read against.
     vector<Path> target_paths;
+    
+    // Remember all the distances we walk down
+    vector<double> haplotype_downstream_walks;
         
-    for (auto& cut_handle : leftmost_handles) {
+    for (auto& handle_and_distance : walkbacks) {
         // Then from each final node we reach for any source, walk the GBWT right
         // by a larger distance, through the read and anything it could map to.
-        size_t downstream_distance = aln.sequence().size() * 5;
+        auto& cut_handle = handle_and_distance.first;
+        auto& downstream_distance = handle_and_distance.second;
         
-        // Explore riught on the same strand
+        haplotype_downstream_walks.push_back(downstream_distance);
+        
+        // Explore right on the same strand
         Position cut_position = make_position(gbwt_graph.get_id(cut_handle),
-            gbwt_graph.get_is_reverse(cut_handle), gbwt_graph.get_length(cut_handle));
+            gbwt_graph.get_is_reverse(cut_handle), 0);
+            
+#ifdef debug
+        cerr << "Do GBWT walk back " << downstream_distance << " bases from " << pb2json(cut_position) << endl;
+#endif
         
         explore_gbwt(cut_position, downstream_distance,
             [&](const ImmutablePath& path, const handle_t& visit) -> bool {
@@ -1595,7 +1750,7 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
         // Do global alignment to the path subgraph
         Alignment path_alignment;
         path_alignment.set_sequence(aln.sequence());
-        
+
 #ifdef debug
         cerr << "Align " << pb2json(path_alignment) << " local";
 
@@ -1650,6 +1805,9 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
     set_annotation(out, "haplotype_alignment_paths", (double)target_paths.size());
     // And how much area we did
     set_annotation(out, "haplotype_dp_areas", haplotype_dp_areas);
+    // And how far we were willing to walk the GBWT
+    set_annotation(out, "haplotype_upstream_walks", haplotype_upstream_walks);
+    set_annotation(out, "haplotype_downstream_walks", haplotype_downstream_walks);
     
     // We're done!
     
