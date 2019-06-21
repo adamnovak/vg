@@ -1576,11 +1576,14 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
         
     }
     
+    // Track how much DP is done when operating on haplotypes/
+    vector<double> haplotype_dp_areas;
+    
     // Now look for the best alignment to any path.
     // We set thid to ~-inf because we even want results with 0 score.
     int64_t best_score = numeric_limits<int64_t>::min();
     // we will store the winner in out's path, so set the rest of out's parameters.
-    
+
     for (auto& path : target_paths) {
         // For each path, make sure it isn't empty.
         assert(path.mapping_size() > 0);
@@ -1636,12 +1639,17 @@ void MinimizerMapper::align_to_local_haplotypes(const Alignment& aln, const vect
             
             best_score = path_alignment.score();
         }
+        
+        // Record how much DP we did.
+        haplotype_dp_areas.push_back(path_alignment.sequence().size() * path_from_length(path));
     }
     
     // Now the best alignment from any path is in out.
     
     // Annotate it with how many paths we had to align it against.
-    set_annotation(out, "local_alignment_paths", (double)target_paths.size());
+    set_annotation(out, "haplotype_alignment_paths", (double)target_paths.size());
+    // And how much area we did
+    set_annotation(out, "haplotype_dp_areas", haplotype_dp_areas);
     
     // We're done!
     

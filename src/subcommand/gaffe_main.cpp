@@ -88,8 +88,8 @@ int main_gaffe(int argc, char** argv) {
     bool do_chaining = true;
     // Should we use the xdrop aligner for aligning tails?
     bool use_xdrop_for_tails = false;
-    // Should we do every last tail alignment, or only the good ones?
-    bool do_all_tails = false;
+    // How many tails does a read need to have on one side to fall back on alignment against local haplotypes?
+    size_t max_tail_extensions = numeric_limits<size_t>::max();
     // What GAMs should we realign?
     vector<string> gam_filenames;
     // What FASTQs should we align.
@@ -135,13 +135,13 @@ int main_gaffe(int argc, char** argv) {
             {"score-fraction", required_argument, 0, 'F'},
             {"no-chaining", no_argument, 0, 'O'},
             {"xdrop", no_argument, 0, 'X'},
-            {"all-tails", no_argument, 0, 'A'},
+            {"tail-limit", required_argument, 0, 'T'},
             {"threads", required_argument, 0, 't'},
             {0, 0, 0, 0}
         };
 
         int option_index = 0;
-        c = getopt_long (argc, argv, "hx:H:m:s:d:pG:f:M:N:R:nc:C:F:e:a:OXAt:",
+        c = getopt_long (argc, argv, "hx:H:m:s:d:pG:f:M:N:R:nc:C:F:e:a:OXT:t:",
                          long_options, &option_index);
 
 
@@ -275,8 +275,8 @@ int main_gaffe(int argc, char** argv) {
                 use_xdrop_for_tails = true;
                 break;
                 
-            case 'A':
-                do_all_tails = true;
+            case 'T':
+                max_tail_extensions = parse<size_t>(optarg);
                 break;
                 
             case 't':
@@ -408,11 +408,9 @@ int main_gaffe(int argc, char** argv) {
     minimizer_mapper.use_xdrop_for_tails = use_xdrop_for_tails;
     
     if (progress) {
-        cerr << "--all-tails " << do_all_tails << endl;
+        cerr << "--tail-limit " << max_tail_extensions << endl;
     }
-    if (do_all_tails) {
-        minimizer_mapper.max_tail_extensions = numeric_limits<size_t>::max();
-    }
+    minimizer_mapper.max_tail_extensions = max_tail_extensions;
 
     minimizer_mapper.sample_name = sample_name;
     minimizer_mapper.read_group = read_group;
