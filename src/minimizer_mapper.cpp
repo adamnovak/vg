@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cmath>
 
+#define debug
+
 namespace vg {
 
 using namespace std;
@@ -26,6 +28,12 @@ MinimizerMapper::MinimizerMapper(const gbwtgraph::GBWTGraph& graph, const gbwtgr
     extender(gbwt_graph, *(get_regular_aligner())), clusterer(distance_index) {
     
     // Nothing to do!
+    
+#ifdef debug
+    cerr << "Created minimizer mapper for k=" << minimizer_index.k() << " w=" << minimizer_index.w()
+        << " with " << minimizer_index.size() << " minimizers and " << minimizer_index.values() << " occurrences" << endl;
+#endif
+    
 }
 
 void MinimizerMapper::map(Alignment& aln, AlignmentEmitter& alignment_emitter) {
