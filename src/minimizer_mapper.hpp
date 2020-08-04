@@ -153,6 +153,11 @@ public:
 
     /// The algorithm used for rescue.
     RescueAlgorithm rescue_algorithm = rescue_dozeu;
+    
+    /// When looking for pairs, how many pairs with identical, best scores and
+    /// distances should we investigate per fragment before trying another
+    /// fragment?
+    size_t pairs_per_fragment_patience = 10;
 
     bool fragment_distr_is_finalized () {return fragment_length_distr.is_finalized();}
     void finalize_fragment_length_distr() {

@@ -21,7 +21,7 @@
 #include <algorithm>
 #include <cmath>
 
-//#define debug
+#define debug
 //#define print_minimizers
 //#define debug_dump_graph
 
@@ -1378,8 +1378,7 @@ pair<vector<Alignment>, vector< Alignment>> MinimizerMapper::map_paired(Alignmen
     vector<tuple<size_t, size_t, bool>> unpaired_alignments;
     size_t unpaired_count_1 = 0;
     size_t unpaired_count_2 = 0;
-
-    for (size_t fragment_num = 0 ; fragment_num < alignments.size() ; fragment_num ++ ) {
+    for (size_t fragment_num = 0 ; fragment_num < alignments.size() ; fragment_num++) {
         //Get pairs of plausible alignments
         alignment_groups[fragment_num].first.resize(alignments[fragment_num].first.size());
         alignment_groups[fragment_num].second.resize(alignments[fragment_num].second.size());
@@ -1388,12 +1387,29 @@ pair<vector<Alignment>, vector< Alignment>> MinimizerMapper::map_paired(Alignmen
         if (!fragment_alignments.first.empty() && ! fragment_alignments.second.empty()) {
             //Only keep pairs of alignments that were in the same fragment cluster
             found_pair = true;
-            for (size_t i1 = 0 ; i1 < fragment_alignments.first.size() ; i1++)  {
+            
+            // Pairs is O(n^2) in the number of alignments. We want to limit
+            // the number we look at.
+            // So we count the number of pairs seen with the top pair score
+            // (including fragment length score), in order to avoid spending
+            // loads of time on identical tandem repeats.
+            double top_score = 0;
+            size_t pairs_seen_with_top_score = 0;
+            
+            size_t pairs_considered = 0;
+            
+#ifdef debug
+            cerr << "For fragment " << fragment_num << " pair up " << fragment_alignments.first.size() << " ends against " << fragment_alignments.second.size() << " ends" << endl;
+#endif
+                    
+            for (size_t i1 = 0; i1 < fragment_alignments.first.size() && pairs_seen_with_top_score < pairs_per_fragment_patience; i1++)  {
                 Alignment& alignment1 = fragment_alignments.first[i1];
                 size_t j1 = alignment_indices[fragment_num].first[i1];
-                for (size_t i2 = 0 ; i2 < fragment_alignments.second.size() ; i2++) {
+                for (size_t i2 = 0; i2 < fragment_alignments.second.size() && pairs_seen_with_top_score < pairs_per_fragment_patience; i2++) {
                     Alignment& alignment2 = fragment_alignments.second[i2];
                     size_t j2 = alignment_indices[fragment_num].second[i2];
+                    
+                    pairs_considered++;
 
                     //Get the likelihood of the fragment distance
                     int64_t fragment_distance = distance_between(alignment1, alignment2); 
@@ -1411,6 +1427,20 @@ pair<vector<Alignment>, vector< Alignment>> MinimizerMapper::map_paired(Alignmen
 #ifdef print_minimizers
                         alignment_was_rescued.emplace_back(false, false);
 #endif
+
+                        if (score > top_score) {
+                            top_score = score;
+                            pairs_seen_with_top_score = 1;
+                        } else if (score == top_score) {
+                            // We should get tired of seeing things not better than this eventually
+                            pairs_seen_with_top_score++;
+                        }
+                        // No need to cap MAPQ here; if we see many
+                        // identical-scoring pair copies we already know we
+                        // have a low MAPQ. We don't need to account for the
+                        // possible pairs we don't investigate when we run out
+                        // of patience.
+                        
 
 #ifdef debug
         cerr << "Found pair of alignments from fragment " << fragment_num << " with scores " 
@@ -1436,6 +1466,11 @@ pair<vector<Alignment>, vector< Alignment>> MinimizerMapper::map_paired(Alignmen
                     }
                 }
             }
+            
+#ifdef debug
+            cerr << "For fragment " << fragment_num << " considered " << pairs_considered << "/" << fragment_alignments.first.size() * fragment_alignments.second.size() << " potential pairs overall" << endl;
+#endif
+            
         } else if (!fragment_alignments.first.empty()) {
 #ifdef debug
             cerr << "Found unpaired alignments from fragment " << fragment_num << " for first read" << endl;
@@ -2472,6 +2507,7 @@ double MinimizerMapper::window_breaking_quality(const vector<Minimizer>& minimiz
     return *min_cost_at;
 }
 
+#undef debug
 double MinimizerMapper::faster_cap(const vector<Minimizer>& minimizers, vector<size_t>& minimizers_explored,
     const string& sequence, const string& quality_bytes) {
 
@@ -2723,6 +2759,7 @@ double MinimizerMapper::get_prob_of_disruption_in_column(const vector<Minimizer>
     
     return p;
 }
+#define debug
 
 //-----------------------------------------------------------------------------
 
