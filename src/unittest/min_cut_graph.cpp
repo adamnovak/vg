@@ -787,6 +787,13 @@ namespace vg {
             //call min-cut-decomposition
             vector<unordered_set<size_t>> to_recv =  min_cut_decomposition(graph, seed);
             
+            for (auto& s : to_recv) {
+                for (auto& n : s) {
+                    std::cerr << n << " ";
+                }
+                std::cerr << std::endl;
+            }
+            
             REQUIRE(to_recv.size() == 7); //Gamma has 7 sets 
          
             unordered_set<size_t> set1 = {8,7,6,5,4};
