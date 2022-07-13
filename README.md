@@ -48,7 +48,7 @@ First, obtain the repo and its submodules:
     git clone --recursive https://github.com/vgteam/vg.git
     cd vg
     
-Then, install VG's dependencies. You'll need the protobuf and jansson development libraries installed, and to run the tests you will need:
+Then, install VG's dependencies. You'll need the protobuf and jansson development libraries installed, [pybind11 for building vcflib](https://github.com/vcflib/vcflib/issues/348), and to run the tests you will need:
     * `jq`, `bc`, `rs`, and `parallel`
     * `hexdump` and `column` from `bsdmainutils`
     * [`npm` for testing documentation examples](https://github.com/anko/txm)).
@@ -63,7 +63,7 @@ On other distros, you will need to perform the equivalent of:
                          automake gettext autopoint libtool jq bsdmainutils bc rs parallel \
                          npm curl unzip redland-utils librdf-dev bison flex gawk lzma-dev \
                          liblzma-dev liblz4-dev libffi-dev libcairo-dev libboost-all-dev \
-                         libzstd-devel
+                         libzstd-devel pybind11-dev
                          
 Note that **Ubuntu 16.04** does not ship a sufficiently new Protobuf; vg requires **Protobuf 3** which will have to be manually installed.
 

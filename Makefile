@@ -611,13 +611,19 @@ $(LIB_DIR)/libtabixpp.a: $(LIB_DIR)/libhts.a $(TABIXPP_DIR)/*.cpp $(TABIXPP_DIR)
 
 # Build vcflib. Install the library and headers but not binaries or man pages.
 $(LIB_DIR)/libvcflib.a: $(LIB_DIR)/libhts.a $(LIB_DIR)/libtabixpp.a $(VCFLIB_DIR)/src/*.cpp $(VCFLIB_DIR)/src/*.hpp $(VCFLIB_DIR)/intervaltree/*.cpp $(VCFLIB_DIR)/intervaltree/*.h
-	+. ./source_me.sh && cd $(VCFLIB_DIR) && rm -Rf build && mkdir build && cd build && PKG_CONFIG_PATH="$(CWD)/$(LIB_DIR)/pkgconfig:$(PKG_CONFIG_PATH)" cmake -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON .. && cmake --build .
+	+. ./source_me.sh && cd $(VCFLIB_DIR) && rm -Rf build && mkdir build && cd build && PKG_CONFIG_PATH="$(CWD)/$(LIB_DIR)/pkgconfig:$(PKG_CONFIG_PATH)" cmake -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON -DBUILD_ONLY_LIB=ON .. && cmake --build .
 	+cp $(VCFLIB_DIR)/filevercmp/*.h* $(INC_DIR)
 	+cp $(VCFLIB_DIR)/fastahack/*.h* $(INC_DIR)
 	+cp $(VCFLIB_DIR)/smithwaterman/*.h* $(INC_DIR)
 	+cp $(VCFLIB_DIR)/intervaltree/*.h* $(INC_DIR)
 	+cp $(VCFLIB_DIR)/multichoose/*.h* $(INC_DIR)
 	+cp $(VCFLIB_DIR)/src/*.h* $(INC_DIR)
+	# TODO: vcflib can't install these itself. See <https://github.com/vcflib/vcflib/issues/358>
+	+mkdir -p $(INC_DIR)/bindings/cpp && cp $(VCFLIB_DIR)/contrib/WFA2-lib/bindings/cpp/*.hpp $(INC_DIR)/bindings/cpp/
+	+mkdir -p $(INC_DIR)/wavefront && cp $(VCFLIB_DIR)/contrib/WFA2-lib/wavefront/*.h $(INC_DIR)/wavefront/
+	+mkdir -p $(INC_DIR)/utils && cp $(VCFLIB_DIR)/contrib/WFA2-lib/utils/*.h $(INC_DIR)/utils/
+	+mkdir -p $(INC_DIR)/alignment && cp $(VCFLIB_DIR)/contrib/WFA2-lib/alignment/*.h $(INC_DIR)/alignment/
+	+mkdir -p $(INC_DIR)/system && cp $(VCFLIB_DIR)/contrib/WFA2-lib/system/*.h $(INC_DIR)/system/
 	+cp $(VCFLIB_DIR)/build/libvcflib.a $(LIB_DIR)
 
 # vcflib binaries are all automatically built. We need this one.
