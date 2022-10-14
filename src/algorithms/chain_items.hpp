@@ -900,29 +900,32 @@ struct ChainingSpace<NewSnarlSeedClusterer::Seed, Source> : public MinimizerSour
             Item right_copy(right);
             // Get the distance, stopping at the lowest common ancestor so we don't go outside and come back like a read doesn't.
             size_t distance = clusterer.distance_between_seeds(left_copy, right_copy, true);
-            if (distance == std::numeric_limits<size_t>::max()) {
-                // Sometimes the cached data can say things are unreachable when the positions we would use would say they aren't.
-                // Just leave them unreachable.
+            if (distance != std::numeric_limits<size_t>::max()) {
+                // We know a distance that is reachable here.
+            
+                // The distance is between the actual minimizer-occurs-at bases, so
+                // we need to compensate for minimizer orientation to work out if
+                // it is the start or end of the alignment we see the item as, and
+                // then adjust the distance by removing one or both itme lengths.
+                
+                if (!this->sources[left.source].value.is_reverse) {
+                    // We measured from the start of the left item but we want it from the exclusive end.
+                    distance -= this->graph_length(left);
+                } else {
+                    distance -= 1;
+                }
+                
+                if (this->sources[right.source].value.is_reverse) {
+                    // We measured to the inclusive end of the right item but we want it to the start.
+                    distance -= (this->graph_length(right) - 1);
+                }
+                
                 return distance;
             }
-            // The distance is between the actual minimizer-occurs-at bases, so
-            // we need to compensate for minimizer orientation to work out if
-            // it is the start or end of the alignment we see the item as, and
-            // then adjust the distance by removing one or both itme lengths.
             
-            if (!this->sources[left.source].value.is_reverse) {
-                // We measured from the start of the left item but we want it from the exclusive end.
-                distance -= this->graph_length(left);
-            } else {
-                distance -= 1;
-            }
-            
-            if (this->sources[right.source].value.is_reverse) {
-                // We measured to the inclusive end of the right item but we want it to the start.
-                distance -= (this->graph_length(right) - 1);
-            }
-            
-            return distance;
+            // Sometimes the cached data can say things are unreachable when
+            // the positions we would use would say they aren't.
+            // In that case, fall back.
         }
         
         if (!this->distance_source) {
