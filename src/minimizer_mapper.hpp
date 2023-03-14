@@ -199,7 +199,7 @@ public:
     double bucket_scale = default_bucket_scale;
     
     /// How many fragments should we try and make in every bucket?
-    static constexpr size_t default_max_fragments_per_bucket = 3;
+    static constexpr size_t default_max_fragments_per_bucket = std::numeric_limits<size_t>::max();
     size_t max_fragments_per_bucket = default_max_fragments_per_bucket;
     
     /// If the read coverage of a fragment connection is less than the best of any
