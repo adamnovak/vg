@@ -629,7 +629,6 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
     fragment_cfg.max_chains_per_cluster = this->max_fragments_per_bucket;
     
     auto fragment_results = this->chain_clusters(aln, minimizers, seeds, buckets, fragment_cfg, seeds.size(), seeds.size(), funnel, 2, std::numeric_limits<size_t>::max(), rng);
-    
     if (track_provenance) {
         funnel.substage("translate-fragments");
     }
@@ -708,6 +707,8 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
     }
     
     // Record fragment statistics
+    // Number of buckets actually searched for fragments
+    double buckets_fragmented = fragment_results.cluster_chains.size();
     // Chaining score (and implicitly fragment count)
     std::vector<double> fragment_scores;
     // Chain length
@@ -1538,6 +1539,7 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
     }
     
     // Special fragment statistics
+    set_annotation(mappings[0], "buckets_fragmented", buckets_fragmented);
     set_annotation(mappings[0], "fragment_scores", fragment_scores);
     set_annotation(mappings[0], "fragment_item_counts", fragment_item_counts);
     set_annotation(mappings[0], "fragment_bound_coverages", fragment_bound_coverages);
