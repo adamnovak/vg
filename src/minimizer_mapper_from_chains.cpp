@@ -608,7 +608,7 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
     chain_config_t fragment_cfg;
     
     // Make fragments be compact
-    fragment_cfg.max_lookback_bases = 200;
+    fragment_cfg.max_lookback_bases = 400;
     fragment_cfg.min_lookback_items = 0;
     fragment_cfg.lookback_item_hard_cap = 3;
     fragment_cfg.initial_lookback_threshold = this->initial_lookback_threshold;
@@ -618,17 +618,13 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
     fragment_cfg.item_bonus = this->item_bonus;
     fragment_cfg.max_indel_bases = 50;
     
-    // Do all the ones that are 75% as good as the best, or down to 50% as good
-    // as the best if that is what it takes to get the second best
-    double bucket_score_cutoff = best_bucket_score / 0.75;
-    if (bucket_score_cutoff - (bucket_score_cutoff / 0.25) < second_best_bucket_score) {
-        bucket_score_cutoff = std::min(bucket_score_cutoff, second_best_bucket_score);
-    }
+    // Do only best and second-best buckets
+    double bucket_score_cutoff = second_best_bucket_score;
     fragment_cfg.cluster_score_cutoff = bucket_score_cutoff;
     fragment_cfg.cluster_score_cutoff_enabled = true;
     fragment_cfg.cluster_coverage_threshold = 1.0;
-    fragment_cfg.min_clusters_to_chain = std::numeric_limits<size_t>::max();
-    fragment_cfg.max_clusters_to_chain = std::numeric_limits<size_t>::max();
+    fragment_cfg.min_clusters_to_chain = 1;
+    fragment_cfg.max_clusters_to_chain = 2;
     
     fragment_cfg.max_chains_per_cluster = this->max_fragments_per_bucket;
     
