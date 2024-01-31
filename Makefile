@@ -422,9 +422,6 @@ endif
 # On the command line, you can `make jemalloc=off` if you definitely don't want jemalloc.
 # Or you can `make jemalloc=debug` to use a version that tries to find memory errors.
 jemalloc = on
-ifeq ($(shell uname -s),Darwin)
-	jemalloc = off
-endif
 
 # Only depend on these files for the final linking stage.	
 # These libraries provide no headers to affect the vg build.	

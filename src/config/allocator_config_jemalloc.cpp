@@ -9,6 +9,10 @@
 #include <fstream>
 #include <cstring>
 
+// Turn off renaming from e.g. je_mallctl to mallctl because without this on
+// Mac you end up trying to link _mallctl when you call mallctl for some
+// reason.
+#define JEMALLOC_NO_RENAME
 #include <jemalloc/jemalloc.h>
 
 extern "C" {
@@ -94,7 +98,7 @@ void AllocatorConfig::configure() {
             // Then fix up all existing arenas (without allocating?)
             // To write these string parameters we need to copy a pointer into place, not a value
             const char** dss_str_location = &dss_str; 
-            auto mallctl_result = mallctl("arena." STRINGIFY(MALLCTL_ARENAS_ALL) ".dss", nullptr, nullptr, (void*) dss_str_location, sizeof(dss_str_location));
+            auto mallctl_result = je_mallctl("arena." STRINGIFY(MALLCTL_ARENAS_ALL) ".dss", nullptr, nullptr, (void*) dss_str_location, sizeof(dss_str_location));
             if (mallctl_result) {
                 cerr << "Could not set dss priority on existing jemalloc arenas: " << strerror(mallctl_result) << endl;
                 exit(1);
@@ -113,7 +117,7 @@ void AllocatorConfig::set_profiling(bool should_profile) {
     //
     // You need to start vg with something like
     // MALLOC_CONF="prof_active:false,prof:true" for this to be useful.
-    auto mallctl_result = mallctl("prof.active", nullptr, nullptr, &should_profile, sizeof(should_profile));
+    auto mallctl_result = je_mallctl("prof.active", nullptr, nullptr, &should_profile, sizeof(should_profile));
     if (mallctl_result && should_profile) {
         static bool warned = false;
         if (!warned) {
@@ -130,7 +134,7 @@ void AllocatorConfig::snapshot() {
     // You need to start vg with something like
     // MALLOC_CONF="prof_prefix:jeprof.out" for this to have a filename to go
     // to.
-    auto mallctl_result = mallctl("prof.dump", NULL, NULL, NULL, 0);
+    auto mallctl_result = je_mallctl("prof.dump", NULL, NULL, NULL, 0);
     // Ignore any errors since profiling may not be enabled this run. 
 }
 
