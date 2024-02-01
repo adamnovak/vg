@@ -153,7 +153,15 @@ bool SharedArena::enter() {
 
         // Allocate the name table in the arena
         std::unordered_map<std::string, const void*>*& name_table = *(std::unordered_map<std::string, const void*>**)(((void**) mapped_address) + 1);
-        name_table = new std::unordered_map<std::string, const void*>();
+        try {
+            name_table = new std::unordered_map<std::string, const void*>();
+        } catch (std::bad_alloc& e) {
+            is_entered = false;
+            if (!this->set_arena_area(nullptr, 0)) {
+                throw std::runtime_error("Failed to leave arena");
+            }
+            throw std::runtime_error("Cannot allocate name table due to bad_alloc");
+        }
 
         if (name_table == nullptr) {
             is_entered = false;

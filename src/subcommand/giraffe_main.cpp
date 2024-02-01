@@ -1328,7 +1328,7 @@ int main_giraffe(int argc, char** argv) {
     if (!serve_path.empty()) {
         // Set up an arena to capture everything we load.
         std::cerr << "Creating shared memory arena at " << serve_path << std::endl;
-        index_arena.reset(new vg::SharedArena(serve_path, 4 * 1024 * 1024, vg::AllocatorConfig::get_arena_hook()));
+        index_arena.reset(new vg::SharedArena(serve_path, 1024 * 1024 * 1024, vg::AllocatorConfig::get_arena_hook()));
         index_arena->enter();
         std::cerr << "Entered arena" << std::endl;
     }

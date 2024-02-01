@@ -175,6 +175,7 @@ struct MemoryBlockExtentHooks : public extent_hooks_t {
         this->merge = nullptr;
     }
 
+#define debug
     /**
      * Actual jemalloc extent allocation hook.
      *
@@ -238,6 +239,7 @@ struct MemoryBlockExtentHooks : public extent_hooks_t {
     /// Number of bytes used from the region
     size_t cursor;
 };
+#undef debug
 
 static std::vector<size_t> normal_thread_arena_numbers;
 
