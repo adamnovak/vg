@@ -1401,6 +1401,13 @@ int main_giraffe(int argc, char** argv) {
         oversized_zipcodes = (ZipCodeCollection*) index_arena->load_named_value("oversized_zipcodes");
     }
 
+    std::cerr << "Minimizer index: " << minimizer_index << std::endl;
+    std::cerr << "GBZ: " << gbz << std::endl;
+    std::cerr << "Path position graph: " << path_position_graph << std::endl;
+    std::cerr << "Oversized zipcodes: " << oversized_zipcodes << std::endl;
+    std::cerr << "GBZ Graph: " << &gbz->graph << std::endl;
+    std::cerr << "GBZ graph nodes: " << gbz->graph.get_node_count() << std::endl;
+
     if (!serve_path.empty()) {
         // Save all the indexes
         index_arena->save_named_value("minimizer_index", (const void*) minimizer_index);
