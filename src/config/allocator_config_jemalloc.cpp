@@ -9,15 +9,22 @@
 #include <fstream>
 #include <cstring>
 #include <cassert>
+#include <vector>
+#include <limits>
 
 #include <omp.h>
 
-
-// Turn off renaming from e.g. je_mallctl to mallctl because without this on
-// Mac you end up trying to link _mallctl when you call mallctl for some
-// reason.
+#ifdef __APPLE__
+    // Turn off renaming from e.g. je_mallctl to mallctl because without this on
+    // Mac you end up trying to link _mallctl when you call mallctl for some
+    // reason.
 #define JEMALLOC_NO_RENAME
+#endif
 #include <jemalloc/jemalloc.h>
+
+#ifndef __APPLE__
+    #define je_mallctl mallctl
+#endif
 
 extern "C" {
     // Hackily define symbols that jemalloc actually exports.
@@ -186,7 +193,9 @@ struct MemoryBlockExtentHooks : public extent_hooks_t {
      * if it is committed.
      */
     static void* alloc_hook(extent_hooks_t* extent_hooks, void* new_addr, size_t size, size_t alignment, bool* zero, bool* commit, unsigned arena_ind) {
+#ifdef debug
         std::cerr << "Extent hook called to allocate " << size << " bytes aligned on " << alignment << " at " << new_addr << std::endl;
+#endif
 
         // Find ourselves 
         MemoryBlockExtentHooks* self = (MemoryBlockExtentHooks*) extent_hooks;
@@ -195,7 +204,9 @@ struct MemoryBlockExtentHooks : public extent_hooks_t {
             // Don't bother checking against overlaps, but do check if this is in our region.
             if ((intptr_t) new_addr < (intptr_t) self->region || ((intptr_t) new_addr) + size > ((intptr_t) self->region) + self->size) {
                 // This block would go out of the region
+#ifdef debug
                 std::cerr << "Does not fit in " << self->region << " size " << self->size << std::endl;
+#endif
                 return nullptr;
             }
 
@@ -206,8 +217,9 @@ struct MemoryBlockExtentHooks : public extent_hooks_t {
             memset(new_addr, 0, size);
             *zero = true;
             *commit = true;
-
+#ifdef debug
             std::cerr << "Allocated at " << new_addr << std::endl;
+#endif
             return new_addr;
         }
 
@@ -258,7 +270,9 @@ bool AllocatorConfig::set_arena_area(char* region, size_t size) {
                 std::cerr << "Could not get thread arena: " << strerror(mallctl_result) << std::endl;
                 exit(1);
             }
+#ifdef debug
             std::cerr << "Main thread usually uses arena " << arena_num << std::endl;
+#endif
         }
 
         // Get all the arenas for all the threads.
@@ -278,15 +292,17 @@ bool AllocatorConfig::set_arena_area(char* region, size_t size) {
             // And store it
             normal_thread_arena_numbers[omp_get_thread_num()] = arena_num;
 
+#ifdef debug
             #pragma omp critical (cerr)
             std::cerr << "Thread " << omp_get_thread_num() << " usually uses arena " << arena_num << std::endl;
+#endif
         }
 
         // Placement new the hooks into the block
         new (extent_hooks_address) MemoryBlockExtentHooks(managed_region_address, managed_region_size);
 
         // And attach them to a new arena
-        unsigned arena_num = 9999;
+        unsigned arena_num = std::numeric_limits<unsigned>::max();
         size_t arena_num_size = sizeof(arena_num);
         extent_hooks_t* extent_hooks_pointer = (extent_hooks_t*) extent_hooks_address;
         size_t extent_hooks_pointer_size = sizeof(extent_hooks_t*);
@@ -295,15 +311,17 @@ bool AllocatorConfig::set_arena_area(char* region, size_t size) {
             std::cerr << "Could not create arena: " << strerror(mallctl_result) << std::endl;
             exit(1);
         }
-        assert(arena_num != 9999);
+        assert(arena_num != std::numeric_limits<unsigned>::max());
 
         if (arena_num_size != sizeof(arena_num)) {
             // Arena creation failed.
-            normal_thread_arena_numbers.clear();
-            return false;
+            std::cerr << "Arena creation failed without error" << std::endl;
+            exit(1);
         }
 
+#ifdef debug
         std::cerr << "Created arena " << arena_num << std::endl;
+#endif
 
         // And tell all the threads to use it
         #pragma omp parallel
@@ -314,8 +332,10 @@ bool AllocatorConfig::set_arena_area(char* region, size_t size) {
                 std::cerr << "Could not set thread arena: " << strerror(mallctl_result) << std::endl;
                 exit(1);
             }
+#ifdef debug
             #pragma omp critical (cerr)
             std::cerr << "Thread " << omp_get_thread_num() << " should now use arena " << arena_num << std::endl;
+#endif
             mallctl_result = je_mallctl("thread.tcache.flush", nullptr, nullptr, nullptr, 0);
             if (mallctl_result) {
                 #pragma omp critical (cerr)
@@ -344,8 +364,10 @@ bool AllocatorConfig::set_arena_area(char* region, size_t size) {
                 exit(1);
             }
 
+#ifdef debug
             #pragma omp critical (cerr)
             std::cerr << "Thread " << omp_get_thread_num() << " should now use arena " << arena_num << std::endl;
+#endif
 
             mallctl_result = je_mallctl("thread.tcache.flush", nullptr, nullptr, nullptr, 0);
             if (mallctl_result) {
