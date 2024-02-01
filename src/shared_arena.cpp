@@ -14,6 +14,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <unordered_map>
+#include <stdexcept>
+
 namespace vg {
 
 SharedArena::SharedArena(const std::string& path, size_t size, AllocatorConfig::arena_hook_t set_arena_area) : path(path), shm_fd(0), size(size), mapped_address(nullptr), can_enter(true), is_entered(false), set_arena_area(set_arena_area) {

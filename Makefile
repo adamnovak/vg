@@ -555,7 +555,7 @@ test/build_graph: test/build_graph.cpp $(LIB_DIR)/libvg.a $(SRC_DIR)/vg.hpp
 
 # TODO: The normal and debug jemalloc builds can't safely be run at the same time.
 $(LIB_DIR)/%jemalloc.a $(LIB_DIR)/%jemalloc.$(SHARED_SUFFIX): $(JEMALLOC_DIR)/src/*.c
-	+. ./source_me.sh && rm -f $(LIB_DIR)/libjemalloc*.* && rm -Rf $(CWD)/$(INC_DIR)/jemalloc && cd $(JEMALLOC_DIR) && ./autogen.sh && ./configure --enable-prof --disable-libdl --prefix=`pwd` $(FILTER) && $(MAKE) clean && $(MAKE) $(FILTER) && cp lib/libjemalloc.a $(CWD)/$(LIB_DIR)/ && cp lib/libjemalloc*.$(SHARED_SUFFIX) $(CWD)/$(LIB_DIR)/ cp -r include/* $(CWD)/$(INC_DIR)/
+	+. ./source_me.sh && rm -f $(LIB_DIR)/libjemalloc*.* && rm -Rf $(CWD)/$(INC_DIR)/jemalloc && cd $(JEMALLOC_DIR) && ./autogen.sh && ./configure --enable-prof --disable-libdl --prefix=`pwd` $(FILTER) && $(MAKE) clean && $(MAKE) $(FILTER) && cp lib/libjemalloc.a $(CWD)/$(LIB_DIR)/ && cp lib/libjemalloc*.$(SHARED_SUFFIX) $(CWD)/$(LIB_DIR)/ && cp -r include/* $(CWD)/$(INC_DIR)/
 
 $(LIB_DIR)/libjemalloc_debug.a: $(JEMALLOC_DIR)/src/*.c
 	+. ./source_me.sh && rm -f $(LIB_DIR)/libjemalloc*.* && rm -Rf $(CWD)/$(INC_DIR)/jemalloc && cd $(JEMALLOC_DIR) && ./autogen.sh && ./configure --enable-prof --disable-libdl --enable-debug --enable-fill --prefix=`pwd` $(FILTER) && $(MAKE) clean && $(MAKE) $(FILTER) && cp lib/libjemalloc.a $(CWD)/$(LIB_DIR)/libjemalloc_debug.a && cp -r include/* $(CWD)/$(INC_DIR)/
@@ -945,9 +945,6 @@ $(UNITTEST_SUPPORT_OBJ): $(UNITTEST_SUPPORT_OBJ_DIR)/%.o : $(UNITTEST_SUPPORT_SR
 	
 # Config objects get individual rules
 $(CONFIG_OBJ_DIR)/allocator_config_jemalloc.o: $(CONFIG_SRC_DIR)/allocator_config_jemalloc.cpp $(CONFIG_OBJ_DIR)/allocator_config_jemalloc.d $(DEPS) $(LIB_DIR)/libjemalloc.a
-	. ./source_me.sh && $(CXX) $(INCLUDE_FLAGS) $(CPPFLAGS) $(CXXFLAGS) $(DEPGEN_FLAGS) -c -o $@ $< $(FILTER)
-	@touch $@
-$(CONFIG_OBJ_DIR)/allocator_config_jemalloc_debug.o: $(CONFIG_SRC_DIR)/allocator_config_jemalloc_debug.cpp $(CONFIG_OBJ_DIR)/allocator_config_jemalloc_debug.d $(DEPS) $(LIB_DIR)/libjemalloc_debug.a
 	. ./source_me.sh && $(CXX) $(INCLUDE_FLAGS) $(CPPFLAGS) $(CXXFLAGS) $(DEPGEN_FLAGS) -c -o $@ $< $(FILTER)
 	@touch $@
 $(CONFIG_OBJ_DIR)/allocator_config_system.o: $(CONFIG_SRC_DIR)/allocator_config_system.cpp $(CONFIG_OBJ_DIR)/allocator_config_system.d $(DEPS)
