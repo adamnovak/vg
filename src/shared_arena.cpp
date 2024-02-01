@@ -24,6 +24,9 @@ SharedArena::SharedArena(const std::string& path, size_t size, AllocatorConfig::
         throw std::runtime_error("Size is too small");
     }
 
+    // Try unlinking first
+    shm_unlink(path.c_str());
+
     // Create the shared memory object
     shm_fd = shm_open(path.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     if (shm_fd == -1) {

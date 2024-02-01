@@ -42,7 +42,7 @@
 #include <valgrind/callgrind.h>
 #endif
 
-#define USE_MEMORY_PROFILING
+//#define USE_MEMORY_PROFILING
 
 #include "../config/allocator_config.hpp"
 #include "../shared_arena.hpp"
@@ -497,6 +497,11 @@ void help_giraffe(char** argv, const BaseOptionGroup& parser, const std::map<std
     << "  -G, --gam-in FILE             read and realign GAM-format reads from FILE" << endl
     << "  -f, --fastq-in FILE           read and align FASTQ-format reads from FILE (two are allowed, one for each mate)" << endl
     << "  -i, --interleaved             GAM/FASTQ input is interleaved pairs, for paired-end alignment" << endl;
+    if (full_help) {
+        cerr
+        << "  --serve-path STR              just load indexes and serve them at shared memory path STR" << endl
+        << "  --load-path STR               don't load indexes and get them from shared memory path STR" << endl;
+    }
 
     cerr
     << "haplotype sampling:" << endl
@@ -567,6 +572,8 @@ int main_giraffe(int argc, char** argv) {
     constexpr int OPT_HAPLOTYPE_NAME = 1100;
     constexpr int OPT_KFF_NAME = 1101;
     constexpr int OPT_INDEX_BASENAME = 1102;
+    constexpr int OPT_SERVE_PATH = 1103;
+    constexpr int OPT_LOAD_PATH = 1104;
 
     // initialize parameters with their default options
     
@@ -766,6 +773,8 @@ int main_giraffe(int argc, char** argv) {
         {"haplotype-name", required_argument, 0, OPT_HAPLOTYPE_NAME},
         {"kff-name", required_argument, 0, OPT_KFF_NAME},
         {"index-basename", required_argument, 0, OPT_INDEX_BASENAME},
+        {"serve-path", required_argument, 0, OPT_SERVE_PATH},
+        {"load-path", required_argument, 0, OPT_LOAD_PATH},
         {"gam-in", required_argument, 0, 'G'},
         {"fastq-in", required_argument, 0, 'f'},
         {"interleaved", no_argument, 0, 'i'},
@@ -932,6 +941,12 @@ int main_giraffe(int argc, char** argv) {
                 break;
             case OPT_INDEX_BASENAME:
                 index_basename_override = optarg;
+                break;
+            case OPT_SERVE_PATH:
+                serve_path = optarg;
+                break;
+            case OPT_LOAD_PATH:
+                load_path = optarg;
                 break;
 
             case 'G':
@@ -1312,8 +1327,10 @@ int main_giraffe(int argc, char** argv) {
     std::unique_ptr<vg::SharedArena> index_arena;
     if (!serve_path.empty()) {
         // Set up an arena to capture everything we load.
-        index_arena.reset(new vg::SharedArena(serve_path, 50 * 1024 * 1024 * 1024, vg::AllocatorConfig::get_arena_hook()));
+        std::cerr << "Creating shared memory arena at " << serve_path << std::endl;
+        index_arena.reset(new vg::SharedArena(serve_path, 4 * 1024 * 1024, vg::AllocatorConfig::get_arena_hook()));
         index_arena->enter();
+        std::cerr << "Entered arena" << std::endl;
     }
 
     if (load_path.empty()) {
@@ -1375,6 +1392,7 @@ int main_giraffe(int argc, char** argv) {
         }
     } else {
         // We have a path to load from so open an arena
+        std::cerr << "Connecting to shared memory arena at " << load_path << std::endl;
         index_arena.reset(new vg::SharedArena(load_path));
         // And fetch out and cast all our indexes
         minimizer_index = (gbwtgraph::DefaultMinimizerIndex*) index_arena->load_named_value("minimizer_index");
@@ -1390,6 +1408,14 @@ int main_giraffe(int argc, char** argv) {
         index_arena->save_named_value("path_position_graph", (const void*) path_position_graph);
         index_arena->save_named_value("oversized_zipcodes", (const void*) oversized_zipcodes);
         index_arena->leave();
+
+        std::cerr << "Indexes now available at shared memory path " << serve_path  << "..." << std::endl;
+
+        while (true) {
+            sleep(1000);
+        }
+
+        return 0;
     }
 
     // Set up the mapper
