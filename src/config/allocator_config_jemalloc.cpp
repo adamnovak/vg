@@ -241,7 +241,7 @@ struct MemoryBlockExtentHooks : public extent_hooks_t {
 
 static std::vector<size_t> normal_thread_arena_numbers;
 
-bool AllocatorConfig::set_arena_area(char* region, size_t size) {
+static bool set_arena_area(char* region, size_t size) {
     if (region) {
         // Setting up
         if (!normal_thread_arena_numbers.empty()) {
@@ -381,6 +381,10 @@ bool AllocatorConfig::set_arena_area(char* region, size_t size) {
 
         return true;
     }
+}
+
+AllocatorConfig::arena_hook_t AllocatorConfig::get_arena_hook() {
+    return set_arena_area;
 }
 
 }

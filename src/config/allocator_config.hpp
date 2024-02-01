@@ -11,6 +11,7 @@
  */
 
 #include <cstddef>
+#include <functional>
  
 namespace vg {
 
@@ -22,6 +23,8 @@ struct AllocatorConfig {
     /**
      * If using a non-system memory allocator, initialize it to a safe
      * configuration in this runtime environment.
+     *
+     * Sets all the other hooks.
      */
     static void configure();
 
@@ -35,7 +38,16 @@ struct AllocatorConfig {
      */
     static void snapshot();
 
+    // We can't actually call any of the functions defined here from code in
+    // libvg, sicne the allocator config only links in in the executable alogn
+    // with the allocator library.
+    //
+    // So we make the executable code grab and pass along function pointers for
+    // anything we ened to call elsewhere.
+
     /**
+     * Function pointer type for function that can set and remove memory arenas.
+     *
      * Set all allocations in all OMP threads to come from the given memory
      * region of the given size, or restores normal allocator behavior if
      * region is null.
@@ -44,7 +56,12 @@ struct AllocatorConfig {
      *
      * May only be called from the main thread.
      */
-    static bool set_arena_area(char* region, size_t size);
+    using arena_hook_t = std::function<bool(char* region, size_t size)>;
+
+    /**
+     * Get the memory arena add/remove function.
+     */
+    static arena_hook_t get_arena_hook();
 
 };
 
