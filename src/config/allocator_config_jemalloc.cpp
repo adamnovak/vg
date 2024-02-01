@@ -9,6 +9,8 @@
 #include <fstream>
 #include <cstring>
 
+#include <omp.h>
+
 // Turn off renaming from e.g. je_mallctl to mallctl because without this on
 // Mac you end up trying to link _mallctl when you call mallctl for some
 // reason.
@@ -136,6 +138,164 @@ void AllocatorConfig::snapshot() {
     // to.
     auto mallctl_result = je_mallctl("prof.dump", NULL, NULL, NULL, 0);
     // Ignore any errors since profiling may not be enabled this run. 
+}
+
+/**
+ * jemalloc arena hooks struct that also keeps track of where we are meant to
+ * allocate from and our own allocator state. Allocates all the extents from
+ * one contiguous pre-made block of memory, and fails when it is depeleted.
+ *
+ * "All operations except allocation can be universally opted out of by setting
+ * the hook pointers to NULL", say the jemalloc docs, so we implement the
+ * world's worst extent manager that only allocates.
+ */
+struct MemoryBlockExtentHooks : public extent_hooks_t {
+    /**
+     * Make a new MemoryBlockExtentHooks on the given block with the given size.
+     */
+    MemoryBlockExtentHooks(void* region, size_t size) : region(region), size(size), cursor(0) {
+        // Set all the hook function pointers
+        this->alloc = &MemoryBlockExtentHooks::alloc_hook;
+        this->dalloc = nullptr;
+        this->destroy = nullptr;
+        this->commit = nullptr;
+        this->decommit = nullptr;
+        this->purge_lazy = nullptr;
+        this->purge_forced = nullptr;
+        this->split = nullptr;
+        this->merge = nullptr;
+    }
+
+    /**
+     * Actual jemalloc extent allocation hook.
+     *
+     * Returns an address to a block of memory of the given size, aligned to a
+     * multiple of the given alignment.
+     *
+     * If zero points to true, must zero the memory. If commit points to true,
+     * must commit the memory.
+     *
+     * If new_addr is set, must put the memory at new_addr or fail.
+     *
+     * On failure, returns null and does not write to zero or commit.
+     *
+     * On success, returns the block address and sets zero to true or false
+     * depending on if it was zeroed and commit to true or fasle depending on
+     * if it is committed.
+     */
+    static void* alloc_hook(extent_hooks_t* extent_hooks, void* new_addr, size_t size, size_t alignment, bool* zero, bool* commit, unsigned arena_ind) {
+        // Find ourselves 
+        MemoryBlockExtentHooks* self = (MemoryBlockExtentHooks*) extent_hooks;
+        
+        if (new_addr) {
+            // Don't bother checking against overlaps, but do check if this is in our region.
+            if ((intptr_t) new_addr < (intptr_t) self->region || ((intptr_t) new_addr) + size > ((intptr_t) self->region) + self->size) {
+                // This block would go out of the region
+                return nullptr;
+            }
+
+            // Mark used through the end of this region
+            self->cursor = std::max(self->cursor,  ((intptr_t) new_addr) + size - ((intptr_t) self->region));
+
+            // Zero and commit (we assume everything is committed)
+            memset(new_addr, 0, size);
+            *zero = true;
+            *commit = true;
+            return new_addr;
+        }
+
+        // Otherwise we need to find an address. Put it after the cursor with the provided alignment spacing.
+        intptr_t next_free = (intptr_t) self->region + self->cursor;
+        size_t alignment_offset = (alignment - (next_free % alignment)) % alignment;
+        
+        // Fall back on the case where an address is known. It will check if it falls in the region or not.
+        return alloc_hook(extent_hooks, (void*)(next_free + alignment_offset), size, alignment, zero, commit, arena_ind);
+    }
+
+    /// Base address of the memory region we are managing.
+    void* region;
+    /// Number of bytes in the region
+    size_t size;
+    /// Number of bytes used from the region
+    size_t cursor;
+};
+
+static std::vector<size_t> normal_thread_arena_numbers;
+
+bool AllocatorConfig::set_arena_area(char* region, size_t size) {
+    if (region) {
+        // Setting up
+        if (!normal_thread_arena_numbers.empty()) {
+            // One of these is already active
+            return false;
+        }
+
+        // We need the extent hooks to live somewhere, so sneak them in at the beginning of the region.
+        // TODO: Do we need to worry about unaligned access or something?
+        if (size < sizeof(MemoryBlockExtentHooks)) {
+            return false;
+        }
+        
+        // Account for the hooks at the start of the region
+        MemoryBlockExtentHooks* extent_hooks_address = (MemoryBlockExtentHooks*) region;
+        void* managed_region_address = (void*)(extent_hooks_address + 1);
+        size_t managed_region_size = size - sizeof(MemoryBlockExtentHooks);
+
+        // Get all the arenas for all the threads.
+        size_t thread_count = omp_get_num_threads();
+        normal_thread_arena_numbers.resize(thread_count);
+        #pragma omp parallel
+        {
+            // Read each thread's arena number
+            unsigned arena_num;
+            size_t arena_num_size = sizeof(arena_num);
+            je_mallctl("thread.arena", &arena_num, &arena_num_size, nullptr, 0);
+            // And store it
+            normal_thread_arena_numbers[omp_get_thread_num()] = arena_num;
+        }
+
+        // Placement new the hooks into the block
+        new (extent_hooks_address) MemoryBlockExtentHooks(managed_region_address, managed_region_size);
+
+        // And attach them to a new arena
+        unsigned arena_num;
+        size_t arena_num_size = sizeof(arena_num);
+        extent_hooks_t* extent_hooks_pointer = (extent_hooks_t*) extent_hooks_address;
+        size_t extent_hooks_pointer_size = sizeof(extent_hooks_t*);
+        je_mallctl("arenas.create", &arena_num, &arena_num_size, &extent_hooks_pointer, extent_hooks_pointer_size);
+
+        if (arena_num_size != sizeof(arena_num)) {
+            // Arena creation failed.
+            normal_thread_arena_numbers.clear();
+            return false;
+        }
+
+        // And tell all the threads to use it
+        #pragma omp parallel
+        {
+            je_mallctl("thread.arena", nullptr, nullptr, &arena_num, arena_num_size);
+        }
+
+        return true;
+    } else {
+        // Turning off. Anything we allocate will still be in the arena.
+
+        if (normal_thread_arena_numbers.size() != omp_get_num_threads()) {
+            throw std::runtime_error("Trying to turn off arena but we don't have the right original arenas for our threads");
+        }
+
+        #pragma omp parallel
+        {
+            // Set each thread's arena number
+            unsigned arena_num = normal_thread_arena_numbers[omp_get_thread_num()];
+            size_t arena_num_size = sizeof(arena_num);
+            je_mallctl("thread.arena", nullptr, nullptr, &arena_num, arena_num_size);
+        }
+
+        normal_thread_arena_numbers.clear();
+
+        return true;
+    }
 }
 
 }

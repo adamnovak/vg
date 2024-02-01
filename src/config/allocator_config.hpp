@@ -9,6 +9,8 @@
  *
  * Contains startup functions and functions to manipulate memory profiling, if available.
  */
+
+#include <cstddef>
  
 namespace vg {
 
@@ -32,6 +34,17 @@ struct AllocatorConfig {
      * Dump a memory profiling snapshot, if available in the allocator.
      */
     static void snapshot();
+
+    /**
+     * Set all allocations in all OMP threads to come from the given memory
+     * region of the given size, or restores normal allocator behavior if
+     * region is null.
+     *
+     * Returns true if successful and false if not supported by the allocator.
+     *
+     * May only be called from the main thread.
+     */
+    static bool set_arena_area(char* region, size_t size);
 
 };
 

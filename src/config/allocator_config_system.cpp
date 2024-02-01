@@ -46,6 +46,11 @@ void AllocatorConfig::snapshot() {
 #endif
 }
 
+bool AllocatorConfig::set_arena_area(char* region, size_t size) {
+    // We can't do this with the system allocator
+    return false;
+}
+
 }
  
 

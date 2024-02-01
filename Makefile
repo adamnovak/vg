@@ -439,8 +439,8 @@ else ifeq ($(jemalloc),debug)
 	LINK_DEPS += $(LIB_DIR)/libjemalloc_debug.a $(LIB_DIR)/libjemalloc_debug_pic.a
     # We have to use it statically or we can't get at its secret symbols.
 	LD_EXE_LIB_FLAGS += $(LIB_DIR)/libjemalloc_debug.a
-	# Use the config object for jemalloc
-    CONFIG_OBJ += $(CONFIG_OBJ_DIR)/allocator_config_jemalloc_debug.o
+	# Use the config object for jemalloc, it's actually the same as the non-debug version
+    CONFIG_OBJ += $(CONFIG_OBJ_DIR)/allocator_config_jemalloc.o
 else
 	# Use the config object for the normal allocator
     CONFIG_OBJ += $(CONFIG_OBJ_DIR)/allocator_config_system.o
