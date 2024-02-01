@@ -54,7 +54,7 @@ public:
 
     /**
      * Save a pointer to something in the shared memory under a name. Not
-     * thread safe with itself or get_named_value(). Can only be used while the
+     * thread safe with itself or load_named_value(). Can only be used while the
      * arena is entered.
      */
     void save_named_value(const std::string& name, const void* pointer);
@@ -63,7 +63,7 @@ public:
      * Get a pointer to something in the shared memory by name, or null if
      * nothing is saved with that name.
      */
-    const void* get_named_value(const std::string& name) const;
+    const void* load_named_value(const std::string& name) const;
 
 private:
 

@@ -73,7 +73,7 @@ TEST_CASE("SharedArena can be connected", "[arena]") {
         }
 
         SharedArena the_other_arena("/thearena");
-        const std::string* got_str = (const std::string*) the_other_arena.get_named_value("message");
+        const std::string* got_str = (const std::string*) the_other_arena.load_named_value("message");
         REQUIRE(got_str != nullptr);
         REQUIRE(*got_str == "This is a secret message");
     }

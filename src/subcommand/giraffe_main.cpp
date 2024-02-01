@@ -44,9 +44,8 @@
 
 #define USE_MEMORY_PROFILING
 
-#ifdef USE_MEMORY_PROFILING
 #include "../config/allocator_config.hpp"
-#endif
+#include "../shared_arena.hpp"
 
 #include <sys/ioctl.h>
 #ifdef __linux__
@@ -626,6 +625,10 @@ int main_giraffe(int argc, char** argv) {
     bool track_position = MinimizerMapper::default_track_position;
     // Should we log our mapping decision making?
     bool show_work = MinimizerMapper::default_show_work;
+    /// Should we load a shared memory index set?
+    std::string load_path;
+    /// Should we save to a shared memory index set?
+    std::string serve_path;
     
     // Should we throw out our alignments instead of outputting them?
     bool discard_alignments = false;
@@ -1269,38 +1272,30 @@ int main_giraffe(int argc, char** argv) {
         }
     }
 #endif
-    
-    // Grab the minimizer index
-    if (show_progress) {
-        cerr << "Loading Minimizer Index" << endl;
-    }
-    auto minimizer_index = vg::io::VPKG::load_one<gbwtgraph::DefaultMinimizerIndex>(registry.require("Minimizers").at(0));
 
-    // Grab the zipcodes
-    if (show_progress) {
-        cerr << "Loading Zipcodes" << endl;
-    }
-    ZipCodeCollection oversized_zipcodes;
-    if (!zipcode_name.empty()) {
+    // We now need to actually load the indexes off the disk.
+    gbwtgraph::DefaultMinimizerIndex* minimizer_index = nullptr;
+    std::unique_ptr<gbwtgraph::DefaultMinimizerIndex> minimizer_index_storage;
+    gbwtgraph::GBZ* gbz = nullptr;
+    std::unique_ptr<gbwtgraph::GBZ> gbz_storage;
+    SnarlDistanceIndex* distance_index = nullptr;
+    std::unique_ptr<SnarlDistanceIndex> distance_index_storage;
+    PathPositionHandleGraph* path_position_graph = nullptr;
+    std::unique_ptr<PathHandleGraph> xg_graph;
+    // If we need an overlay for position lookup, we might be pointing into
+    // this overlay. We want one that's good for reference path queries.
+    std::unique_ptr<bdsg::ReferencePathOverlayHelper> overlay_helper;
+    ZipCodeCollection* oversized_zipcodes = nullptr;
+    std::unique_ptr<ZipCodeCollection> oversized_zipcodes_storage;
 
-        ifstream zip_in (zipcode_name);
-        oversized_zipcodes.deserialize(zip_in);
-        zip_in.close();
-    }
-
-
-    // Grab the GBZ
-    if (show_progress) {
-        cerr << "Loading GBZ" << endl;
-    }
-    auto gbz = vg::io::VPKG::load_one<gbwtgraph::GBZ>(registry.require("Giraffe GBZ").at(0));
-
+    // Load the distance index by itself since it does its own memory mapping
     // Grab the distance index
     if (show_progress) {
         cerr << "Loading Distance Index v2" << endl;
     }
-    auto distance_index = vg::io::VPKG::load_one<SnarlDistanceIndex>(registry.require("Giraffe Distance Index").at(0));
-    
+    distance_index_storage = vg::io::VPKG::load_one<SnarlDistanceIndex>(registry.require("Giraffe Distance Index").at(0));
+    distance_index = distance_index_storage.get();
+
     if (show_progress) {
         cerr << "Paging in Distance Index v2" << endl;
     }
@@ -1311,38 +1306,97 @@ int main_giraffe(int argc, char** argv) {
     std::chrono::time_point<std::chrono::system_clock> preload_end = std::chrono::system_clock::now();
     std::chrono::duration<double> di2_preload_seconds = preload_end - preload_start;
     
-    // If we are tracking correctness, we will fill this in with a graph for
-    // getting offsets along ref paths.
-    PathPositionHandleGraph* path_position_graph = nullptr;
-    // If we need an overlay for position lookup, we might be pointing into
-    // this overlay. We want one that's good for reference path queries.
-    bdsg::ReferencePathOverlayHelper overlay_helper;
-    // And we might load an XG
-    unique_ptr<PathHandleGraph> xg_graph;
-    if (track_correctness || track_position || hts_output) {
-        // Usually we will get our paths from the GBZ
-        PathHandleGraph* base_graph = &gbz->graph;
-        // But if an XG is around, we should use that instead. Otherwise, it's not possible to provide paths when using an old GBWT/GBZ that doesn't have them.
-        if (registry.available("XG")) {
-            if (show_progress) {
-                cerr << "Loading XG Graph" << endl;
-            }
-            xg_graph = vg::io::VPKG::load_one<PathHandleGraph>(registry.require("XG").at(0));
-            base_graph = xg_graph.get();
-        }
     
-        // Apply the overlay if needed.
+    // We might need to load indexes into a shared memory arena, or we might need to
+    // skip it and use a shared memory arena.
+    std::unique_ptr<vg::SharedArena> index_arena;
+    if (!serve_path.empty()) {
+        // Set up an arena to capture everything we load.
+        index_arena.reset(new vg::SharedArena(serve_path, 50 * 1024 * 1024 * 1024, vg::AllocatorConfig::get_arena_hook()));
+        index_arena->enter();
+    }
+
+    if (load_path.empty()) {
+        // Do the loading ourselves
+
+        // Grab the minimizer index
         if (show_progress) {
-            cerr << "Applying overlay" << endl;
+            cerr << "Loading Minimizer Index" << endl;
         }
-        path_position_graph = overlay_helper.apply(base_graph);
+        minimizer_index_storage = vg::io::VPKG::load_one<gbwtgraph::DefaultMinimizerIndex>(registry.require("Minimizers").at(0));
+        minimizer_index = minimizer_index_storage.get();
+
+        // Grab the zipcodes
+        if (show_progress) {
+            cerr << "Loading Zipcodes" << endl;
+        }
+        oversized_zipcodes_storage.reset(new ZipCodeCollection());
+        oversized_zipcodes = oversized_zipcodes_storage.get();
+        if (!zipcode_name.empty()) {
+
+            ifstream zip_in (zipcode_name);
+            oversized_zipcodes->deserialize(zip_in);
+            zip_in.close();
+        }
+
+
+        // Grab the GBZ
+        if (show_progress) {
+            cerr << "Loading GBZ" << endl;
+        }
+        gbz_storage = vg::io::VPKG::load_one<gbwtgraph::GBZ>(registry.require("Giraffe GBZ").at(0));
+        gbz = gbz_storage.get();
+
+        
+    
+        // If we are tracking correctness, we will fill this in with a graph for
+        // getting offsets along ref paths.
+        path_position_graph = nullptr;
+        // We're going to use overlay_helper.
+        // And we might load an XG in xg_graph.
+        if (track_correctness || track_position || hts_output) {
+            // Usually we will get our paths from the GBZ
+            PathHandleGraph* base_graph = &gbz->graph;
+            // But if an XG is around, we should use that instead. Otherwise, it's not possible to provide paths when using an old GBWT/GBZ that doesn't have them.
+            if (registry.available("XG")) {
+                if (show_progress) {
+                    cerr << "Loading XG Graph" << endl;
+                }
+                xg_graph = vg::io::VPKG::load_one<PathHandleGraph>(registry.require("XG").at(0));
+                base_graph = xg_graph.get();
+            }
+        
+            // Apply the overlay if needed.
+            if (show_progress) {
+                cerr << "Applying overlay" << endl;
+            }
+            overlay_helper.reset(new bdsg::ReferencePathOverlayHelper());
+            path_position_graph = overlay_helper->apply(base_graph);
+        }
+    } else {
+        // We have a path to load from so open an arena
+        index_arena.reset(new vg::SharedArena(load_path));
+        // And fetch out and cast all our indexes
+        minimizer_index = (gbwtgraph::DefaultMinimizerIndex*) index_arena->load_named_value("minimizer_index");
+        gbz = (gbwtgraph::GBZ*) index_arena->load_named_value("gbz");
+        path_position_graph = (PathPositionHandleGraph*) index_arena->load_named_value("path_position_graph");
+        oversized_zipcodes = (ZipCodeCollection*) index_arena->load_named_value("oversized_zipcodes");
+    }
+
+    if (!serve_path.empty()) {
+        // Save all the indexes
+        index_arena->save_named_value("minimizer_index", (const void*) minimizer_index);
+        index_arena->save_named_value("gbz", (const void*) gbz);
+        index_arena->save_named_value("path_position_graph", (const void*) path_position_graph);
+        index_arena->save_named_value("oversized_zipcodes", (const void*) oversized_zipcodes);
+        index_arena->leave();
     }
 
     // Set up the mapper
     if (show_progress) {
         cerr << "Initializing MinimizerMapper" << endl;
     }
-    MinimizerMapper minimizer_mapper(gbz->graph, *minimizer_index, &*distance_index, &oversized_zipcodes, path_position_graph);
+    MinimizerMapper minimizer_mapper(gbz->graph, *minimizer_index, distance_index, oversized_zipcodes, path_position_graph);
     if (forced_mean && forced_stdev) {
         minimizer_mapper.force_fragment_length_distr(fragment_mean, fragment_stdev);
     }

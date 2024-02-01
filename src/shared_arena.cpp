@@ -188,7 +188,7 @@ void SharedArena::save_named_value(const std::string& name, const void* pointer)
 }
 
 
-const void* SharedArena::get_named_value(const std::string& name) const {
+const void* SharedArena::load_named_value(const std::string& name) const {
     std::unordered_map<std::string, const void*>*& name_table = *(std::unordered_map<std::string, const void*>**)(((void**) mapped_address) + 1);
     if (name_table == nullptr) {
         throw std::runtime_error("Cannot get value because name table is null");
