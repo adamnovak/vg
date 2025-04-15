@@ -3760,12 +3760,21 @@ void MinimizerMapper::with_dagified_local_graph(const pos_t& left_anchor, const 
         // And use that
         bounding_handles.push_back(overlay_handle);
     }
+    // We already made sure we have at least one anchor, so we definitely
+    // should have at least one bounding handle.
+    crash_unless(!bounding_handles.empty());
     
     // Do the dagification from those input handles.
     // TODO: Note that this can add tips! We should come up with a dagification method that is guaranteed not to!
     auto dagification_result = handlegraph::algorithms::dagify_from(&split_graph, bounding_handles, &dagified_graph, max_path_length);
     auto& dagified_to_split = dagification_result.first;
     auto& anchor_handles = dagification_result.second;
+
+    // Since we had at least one bounding handle, and we get one anchor handle
+    // per bounding handle, we must have at least one anchor handle. If we
+    // somehow don't, we might segfault when we pull out the left and right
+    // anchors.
+    crash_unless(!anchor_handles.empty());
     
     // Figure out which anchoring handle is which anchor.
     handle_t left_anchor_handle = is_empty(left_anchor) ? handle_t() : anchor_handles.front();
