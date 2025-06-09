@@ -115,10 +115,32 @@ namespace vg {
                                            const vector<double>* multiplicities = nullptr) const;
         double estimate_next_best_score(int length, double min_diffs) const;
         
+        /**
+         * Figure out what logarithm is used in the scores in the given score
+         * matrix, to convert between scores and probabilities. The conversion
+         * logic only thinks about matches and mismatches, so the resulting
+         * probabilities sum to 1 over match and all possible mismatches, and
+         * don't account for insertions and deletions.
+         *
+         * Returns not the base of the logarithm itself, but ln(the log base),
+         * which works as a conversion factor: you can multiply a score by the
+         * conversion factor to convert a score in points to a natural-log of a
+         * probability.
+         *
+         * (Or at least that's what reverse-engineering suggests.)
+         */
         double recover_log_base(const int8_t* score_matrix, double gc_content, double tol) const;
         
         bool verify_valid_log_odds_score_matrix(const int8_t* score_matrix, const double* nt_freqs) const;
         
+        /**
+         * Compute what the total probability would be for all possible
+         * combinations of bases, given their scores, frequencies, and a value
+         * lambda to use for ln(log base) when converting scores to
+         * probabilities.
+         *
+         * Considers only matches and mismatches, not indels.
+         */
         double alignment_score_partition_function(double lambda, const int8_t* score_matrix,
                                                   const double* nt_freqs) const;
         
