@@ -1,6 +1,7 @@
 #include "alignment.hpp"
 #include "vg/io/gafkluge.hpp"
 #include "annotation.hpp"
+#include "statistics.hpp"
 #include <vg/io/stream.hpp>
 
 #include <sstream>
@@ -2262,6 +2263,61 @@ map<nid_t, int> alignment_quality_per_node(const Alignment& aln) {
         to_pos += mapping_to_length(mapping);
     }
     return quals;
+}
+
+double alignment_quality_error_rate_excluding_indels(const Alignment& aln) {
+    // We want to sum up the total number of expected errors, and then divide
+    // that b y the total bases visited to get a per-base error rate.
+    //
+    // But we might be adding small floating-point values of very different
+    // magnitudes. If we add a bunch of MAPQ 50 error probabilities after a
+    // MAPQ 10 one we might not actually move the floating point value.
+    //
+    // We know there are only so many quality values, so we count up the number
+    // of each quality value in this array, and we handle them from top to
+    // bottom.
+    constexpr int MAX_QUAL = std::numeric_limits<uint8_t>::max();
+    size_t quality_counts[MAX_QUAL + 1] = {0};
+
+    // TODO: the top so many quality values won't be used because the qualities
+    // came in in phred+33 format which only goes so high.
+
+    // Walk along the edits
+    auto quality_cursor = aln.quality().begin();
+    for (auto& m : aln.path().mapping()) {
+        for (auto& e : m.edit()) {
+            // Find the end of the edit's range in the quality string
+            auto edit_end = quality_cursor;
+            edit_end += e.to_length();
+
+            if (e.from_length() == e.to_length()) {
+                // This is a match or mismatch edit
+                for (auto q = quality_cursor; q != edit_end; ++q) {
+                    // So count the quality values
+                    ++quality_counts[*q];
+                }
+            }
+
+            // Advance to the end of the edit.
+            quality_cursor = edit_end;
+        }
+    }
+
+    // Sum up the expected errors and total bases from the quality counts in a
+    // numerically accurate way (best quality to worst).
+    double expected_errors = 0.0;
+    size_t total_bases = 0;
+
+    for (int i = MAX_QUAL; i >= 0; i--) {
+        if (quality_counts[i] > 0) {
+            // Actually bother to compute the error probability for this cell.
+            expected_errors += quality_counts[i] * phred_to_prob((uint8_t)i);
+            ++total_bases;
+        }
+    }
+
+    // Use the expected errors per base as the overall error probability
+    return expected_errors / total_bases;
 }
 
 string middle_signature(const Alignment& aln, int len) {

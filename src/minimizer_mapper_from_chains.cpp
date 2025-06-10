@@ -897,6 +897,34 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
         }
     }
 
+    for (auto& mapping : mappings) {
+        // Compute an effective mismatch rate for each mapping, not counting softclips
+        
+        if (mapping.path().mapping_size() == 0) {
+            // Left unmapped
+            set_annotation(mapping, "effective_mismatch_rate", 0.0);
+            set_annotation(mapping, "expected_mismatch_rate", 0.0);
+        } else {
+
+            auto start_softclip = softclip_start(mapping);
+            auto end_softclip = softclip_end(mapping);
+
+            // Effective mismatches is the score deficit from the maximum, over the match-mismatch score difference.
+            double max_score = (mapping.sequence().size() - start_softclip - end_softclip) * get_regular_aligner()->match + get_regular_aligner()->full_length_bonus * ((int)(start_softclip == 0) + (int)(end_softclip == 0));
+            crash_unless(max_score >= mapping.score());
+            crash_unless(get_regular_aligner()->mismatch >= 0);
+            double effective_mismatches = (max_score - mapping.score()) / (get_regular_aligner()->mismatch + get_regular_aligner()->match);
+            
+            // Effective mismatch rate is effective mismatches over length
+            double effective_mismatch_rate = effective_mismatches / mapping.sequence().size();
+
+            // Expected mismatch rate comes from the qualities
+            double expected_mismatch_rate = alignment_quality_error_rate_excluding_indels(mapping);
+
+            set_annotation(mapping, "effective_mismatch_rate", effective_mismatch_rate);
+            set_annotation(mapping, "expected_mismatch_rate", expected_mismatch_rate);
+        }
+    }
 
     // Make sure to clamp 0-60.
     mapq = max(mapq, 0.0);

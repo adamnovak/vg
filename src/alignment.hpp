@@ -308,6 +308,14 @@ void normalize_alignment(Alignment& alignment);
 // quality information; a kind of poor man's pileup
 map<id_t, int> alignment_quality_per_node(const Alignment& aln);
 
+/// Get the overall per-base error probability for an Alignment, based on the
+/// quality scores in match and mismatch edits.
+/// 
+/// The caller is responsible for ensuring that the quality values are set.
+///
+/// Compare to phred_sum() from statistics.hpp
+double alignment_quality_error_rate_excluding_indels(const Alignment& aln);
+
 /// Parse regions from the given BED file and call the given callback with each.
 /// Does *not* write them to standard output.
 /// Reads the optional name, is_reverse, and score fields if present, and populates the relevant Alignment fields.
