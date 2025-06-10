@@ -2312,7 +2312,7 @@ double alignment_quality_error_rate_excluding_indels(const Alignment& aln) {
         if (quality_counts[i] > 0) {
             // Actually bother to compute the error probability for this cell.
             expected_errors += quality_counts[i] * phred_to_prob((uint8_t)i);
-            ++total_bases;
+            total_bases += quality_counts[i];
         }
     }
 
