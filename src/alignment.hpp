@@ -316,6 +316,10 @@ map<id_t, int> alignment_quality_per_node(const Alignment& aln);
 /// Compare to phred_sum() from statistics.hpp
 double alignment_quality_error_rate_excluding_indels(const Alignment& aln);
 
+/// Count the number of matched bases, and the number of mismatched bases, in
+/// the given alignment.
+std::pair<size_t, size_t> alignment_count_matches_and_mismatches(const Alignment& aln);
+
 /// Parse regions from the given BED file and call the given callback with each.
 /// Does *not* write them to standard output.
 /// Reads the optional name, is_reverse, and score fields if present, and populates the relevant Alignment fields.

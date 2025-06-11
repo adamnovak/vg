@@ -904,6 +904,9 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
             // Left unmapped
             set_annotation(mapping, "effective_mismatch_rate", 0.0);
             set_annotation(mapping, "expected_mismatch_rate", 0.0);
+            set_annotation(mapping, "true_mismatch_rate", 0.0);
+            set_annotation(mapping, "bad_log_prob_ratio", 0.0);
+            set_annotation(mapping, "not_bad_phred", 0.0);
         } else {
 
             auto start_softclip = softclip_start(mapping);
@@ -915,14 +918,43 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
             crash_unless(get_regular_aligner()->mismatch >= 0);
             double effective_mismatches = (max_score - mapping.score()) / (get_regular_aligner()->mismatch + get_regular_aligner()->match);
             
-            // Effective mismatch rate is effective mismatches over length
-            double effective_mismatch_rate = effective_mismatches / mapping.sequence().size();
+            // Effective mismatch rate is effective mismatches over non-softclip length
+            double effective_mismatch_rate = effective_mismatches / (mapping.sequence().size() - start_softclip - end_softclip);
 
             // Expected mismatch rate comes from the qualities
             double expected_mismatch_rate = alignment_quality_error_rate_excluding_indels(mapping);
 
+            // Count up all the matches and mismatches
+            std::pair<size_t, size_t> matches_and_mismatches = alignment_count_matches_and_mismatches(mapping);
+            auto& matches = matches_and_mismatches.first;
+            auto& mismatches = matches_and_mismatches.second;
+            size_t aligned_bases = matches + mismatches;
+
+            // True mismatch rate is mismatched bases out of paired-up bases
+            double true_mismatch_rate = (double) mismatches / aligned_bases;
+
+            // Use Konstantinos's Shasta model to try and guess if the hit is true or spurious.
+
+            // For a spurious hit, this is the divergence rate between where it
+            // really came from and the hit location we found.
+            constexpr double divergence_rate = 5e-4;
+            // This is the sequencing error rate. Since we're matching a read
+            // against a reference and not against another read, we don't
+            // double it in the formula.
+            double sequencing_error_rate = expected_mismatch_rate;
+            
+            // This is the log10 of the ratio between the probability that the
+            // read is from elsewhere and the probability that the read is from
+            // here. Smaller means it looks more like it's from here.
+            // TODO: Shouldn't the length be the overall region length, including indels?
+            double bad_log_prob_ratio = log10(1 + divergence_rate / sequencing_error_rate) * mismatches - divergence_rate * aligned_bases;
+            double not_bad_phred = -10 * bad_log_prob_ratio;
+
             set_annotation(mapping, "effective_mismatch_rate", effective_mismatch_rate);
             set_annotation(mapping, "expected_mismatch_rate", expected_mismatch_rate);
+            set_annotation(mapping, "true_mismatch_rate", true_mismatch_rate);
+            set_annotation(mapping, "bad_log_prob_ratio", bad_log_prob_ratio);
+            set_annotation(mapping, "not_bad_phred", not_bad_phred);
         }
     }
 

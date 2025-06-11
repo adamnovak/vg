@@ -2320,6 +2320,21 @@ double alignment_quality_error_rate_excluding_indels(const Alignment& aln) {
     return expected_errors / total_bases;
 }
 
+std::pair<size_t, size_t> alignment_count_matches_and_mismatches(const Alignment& aln) {
+    std::pair<size_t, size_t> matches_and_mismatches = {0, 0};
+    for (auto& m : aln.path().mapping()) {
+        for (auto& e : m.edit()) {
+            if (edit_is_match(e)) {
+                matches_and_mismatches.first += e.from_length(); 
+            } else if (edit_is_sub(e)) {
+                matches_and_mismatches.second += e.from_length();
+            }
+        }
+    }
+
+    return matches_and_mismatches;
+}
+
 string middle_signature(const Alignment& aln, int len) {
     return signature(alignment_middle(aln, len));
 }
