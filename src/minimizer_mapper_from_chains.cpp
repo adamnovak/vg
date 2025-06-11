@@ -830,19 +830,6 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
     }
     
     crash_unless(!mappings.empty());
-
-    set_annotation(mappings[0], "separation_prob_under_null", 0.0);
-    if (mappings[0].path().mapping_size() > 0 && scaled_scores.size() > 1) {
-        // What's the probability by chance of seeing as many mismatches or more as the separation between the best and second-best alignment is worth?
-        double separation_prob_under_null = logprob_to_prob(logprob_invert(binomial_cmf_ln(prob_to_logprob(alignment_quality_error_rate_excluding_indels(mappings[0])), mappings[0].sequence().size(), std::max<int>((int)(scaled_scores[0] - scaled_scores[1]) / (get_regular_aligner()->mismatch + get_regular_aligner()->match) - 1, 0))));
-        if (show_work) {
-            #pragma omp critical (cerr)
-            {
-                cerr << log_name() << "Separation probability under null model: " << separation_prob_under_null << std::endl;
-            }
-        }
-        set_annotation(mappings[0], "separation_prob_under_null", separation_prob_under_null);
-    }
     
     // Compute MAPQ if not unmapped. Otherwise use 0 instead of the 50% this would give us.
     // Use exact mapping quality.
