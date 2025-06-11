@@ -828,8 +828,22 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
             cerr << endl;
         }
     }
-
+    
     crash_unless(!mappings.empty());
+
+    set_annotation(mappings[0], "separation_prob_under_null", 0.0);
+    if (mappings[0].path().mapping_size() > 0 && scaled_scores.size() > 1) {
+        // What's the probability by chance of seeing as many mismatches or more as the separation between the best and second-best alignment is worth?
+        double separation_prob_under_null = logprob_to_prob(logprob_invert(binomial_cmf_ln(prob_to_logprob(alignment_quality_error_rate_excluding_indels(mappings[0])), mappings[0].sequence().size(), std::max<int>((int)(scaled_scores[0] - scaled_scores[1]) / (get_regular_aligner()->mismatch + get_regular_aligner()->match) - 1, 0))));
+        if (show_work) {
+            #pragma omp critical (cerr)
+            {
+                cerr << log_name() << "Separation probability under null model: " << separation_prob_under_null << std::endl;
+            }
+        }
+        set_annotation(mappings[0], "separation_prob_under_null", separation_prob_under_null);
+    }
+    
     // Compute MAPQ if not unmapped. Otherwise use 0 instead of the 50% this would give us.
     // Use exact mapping quality.
     // Because the winning alignment won't necessarily *always* have the
@@ -929,6 +943,17 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
             auto& matches = matches_and_mismatches.first;
             auto& mismatches = matches_and_mismatches.second;
             size_t aligned_bases = matches + mismatches;
+            
+            // Also count the insertions which are much more common than
+            // mismatches in HiFi reads.
+            size_t insertions = 0;
+            for (auto& m : mapping.path().mapping()) {
+                for (auto& e : m.edit()) {
+                    if (edit_is_insertion(e)) {
+                        insertions += e.to_length(); 
+                    }
+                }
+            }
 
             // True mismatch rate is mismatched bases out of paired-up bases
             double true_mismatch_rate = (double) mismatches / aligned_bases;
@@ -947,7 +972,7 @@ vector<Alignment> MinimizerMapper::map_from_chains(Alignment& aln) {
             // read is from elsewhere and the probability that the read is from
             // here. Smaller means it looks more like it's from here.
             // TODO: Shouldn't the length be the overall region length, including indels?
-            double bad_log_prob_ratio = log10(1 + divergence_rate / sequencing_error_rate) * mismatches - divergence_rate * aligned_bases;
+            double bad_log_prob_ratio = log10(1 + divergence_rate / sequencing_error_rate) * (mismatches + insertions) - divergence_rate * (aligned_bases + insertions);
             double not_bad_phred = -10 * bad_log_prob_ratio;
 
             set_annotation(mapping, "effective_mismatch_rate", effective_mismatch_rate);
