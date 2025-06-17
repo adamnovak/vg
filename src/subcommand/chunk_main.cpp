@@ -147,10 +147,10 @@ int main_chunk(int argc, char** argv) {
             {"output-bed", required_argument, 0, 'E'},
             {"prefix", required_argument, 0, 'b'},
             {"context", required_argument, 0, 'c'},
-            {"node-ranges", no_argument, 0, 'r'},
-            {"id-ranges", no_argument, 0, 'r'}, // Old, deprecated name
-            {"node-range", no_argument, 0, 'R'},
-            {"id-range", no_argument, 0, 'R'}, // Old, deprecated name
+            {"node-ranges", required_argument, 0, 'r'},
+            {"id-ranges", required_argument, 0, 'r'}, // Old, deprecated name
+            {"node-range", required_argument, 0, 'R'},
+            {"id-range", required_argument, 0, 'R'}, // Old, deprecated name
             {"trace", no_argument, 0, 'T'},
             {"no-embedded-haplotypes", no_argument, 0, OPT_NO_EMBEDDED_HAPLOTYPES},
             {"fully-contained", no_argument, 0, 'f'},
