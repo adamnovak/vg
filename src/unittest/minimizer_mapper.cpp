@@ -38,6 +38,7 @@ public:
     using MinimizerMapper::connect_consistently;
     using MinimizerMapper::to_anchor;
     using MinimizerMapper::fix_dozeu_end_deletions;
+    using MinimizerMapper::get_prob_of_disruption_in_column;
 };
 
 TEST_CASE("Fragment length distribution gets reasonable value", "[giraffe][mapping]") {
@@ -1113,6 +1114,122 @@ TEST_CASE("MinimizerMapper can fix up alignments with deletions on the ends", "[
     REQUIRE(aln.path().mapping(0).edit(0).from_length() == 1);
     REQUIRE(aln.path().mapping(0).edit(0).to_length() == 1);
     REQUIRE(aln.path().mapping(0).edit(0).sequence() == "");
+}
+
+/// Get the minimizers in a sequence, each with hits, in forward strand read order.
+static std::vector<MinimizerMapper::Minimizer> minimizers_in_sequence(const std::string& sequence) {
+    std::vector<MinimizerMapper::Minimizer> minimizers;
+    gbwtgraph::DefaultMinimizerIndex minimizer_index(29, 11, false);
+    for (const std::tuple<gbwtgraph::DefaultMinimizerIndex::minimizer_type, size_t, size_t>& m : minimizer_index.minimizer_regions(sequence)) {
+        int32_t match_length = (int32_t) minimizer_index.k();
+        int32_t candidate_count = (int32_t) minimizer_index.w();
+        
+        auto& value = std::get<0>(m);
+        size_t agglomeration_start = std::get<1>(m);
+        size_t agglomeration_length = std::get<2>(m);
+        
+        minimizers.push_back({ value, agglomeration_start, agglomeration_length, 1, nullptr,
+                               match_length, candidate_count, 1.0 });
+    }
+    // minimizer_regions() produces things in the wrong order, by minimizer
+    // offset (which maybe is strand related?) So we have to sort by
+    // agglomeration start.
+    std::sort(minimizers.begin(), minimizers.end(), [&](const MinimizerMapper::Minimizer& a, const MinimizerMapper::Minimizer& b) {
+        return a.agglomeration_start < b.agglomeration_start;    
+    });
+    return minimizers;
+}
+
+TEST_CASE("MinimizerMapper::get_prob_of_disruption_in_column gives nonzero probabilities even with very high qualities", "[giraffe][mapping][mapping_quality]") {
+
+    // Start with a sequence
+    std::string sequence = "GGCAACACAAGACATGTTTGGCACTAGTTGCAGATGAGACAGCTGCGGTTCACTTTCAAATGTGGGGTGATGAATGTGATGTTTTTGAGCCTGGGGATATCATCCGGTTAGAAAATGGCATCTTTTCTTATATTCGCAATAACCGTAATA";
+    // Say each base has the maximum possible quality.
+    std::string quality_bytes(sequence.size(), std::numeric_limits<uint8_t>::max());
+
+    // Find the minimizers in the sequence, which come out in read order.
+    std::vector<MinimizerMapper::Minimizer> minimizers = minimizers_in_sequence(sequence);
+    
+    // Make a vector of all minimizer indices
+    std::vector<size_t> minimizer_indices;
+    for (size_t i = 0; i < minimizers.size(); i++) {
+        minimizer_indices.push_back(i);
+    }
+
+    // Track a range of overlapping-the-current-column minimizer agglomerations
+    // as we sweep a column through the read.
+    std::vector<size_t>::iterator overlapping_start = minimizer_indices.begin();
+    std::vector<size_t>::iterator overlapping_end = overlapping_start;
+    for (size_t column_base = 0; column_base < sequence.size(); column_base++) {
+        // For each column in the read in order
+
+        while (overlapping_end != minimizer_indices.end() && minimizers[*overlapping_end].agglomeration_start <= column_base) {
+            ++overlapping_end;
+        }
+        while (overlapping_start != overlapping_end && minimizers[*overlapping_start].agglomeration_start + minimizers[*overlapping_start].agglomeration_length <= column_base) {
+            // The earliest included minimizer ends too early to actually cover the column, so eject it.
+            ++overlapping_start;
+        }
+
+#ifdef debug
+        std::cerr << "Consider column " << column_base << " minimizer rows " << (overlapping_start - minimizer_indices.begin()) << " to " << (overlapping_end - minimizer_indices.begin()) << std::endl;
+        
+        if (overlapping_start != overlapping_end) {
+            std::cerr << "Starts touching agglomeration at " << minimizers[*overlapping_start].agglomeration_start << "-" << (minimizers[*overlapping_start].agglomeration_start + minimizers[*overlapping_start].agglomeration_length) << std::endl;
+            auto overlapping_stop = overlapping_end;
+            --overlapping_stop;
+            std::cerr << "Ends touching agglomeration at " << minimizers[*overlapping_stop].agglomeration_start << "-" << (minimizers[*overlapping_stop].agglomeration_start + minimizers[*overlapping_stop].agglomeration_length) << std::endl;
+            if (overlapping_end != minimizer_indices.end()) {
+             std::cerr << "Ends before agglomeration at " << minimizers[*overlapping_end].agglomeration_start << "-" << (minimizers[*overlapping_end].agglomeration_start + minimizers[*overlapping_end].agglomeration_length) << std::endl;
+            }
+        }
+#endif
+
+        // Now we're looking at a column in the read and the minimizer
+        // agglomerations that overlap it. Check the disruption probability.
+        double disruption_probability = TestMinimizerMapper::get_prob_of_disruption_in_column(
+            minimizers,
+            sequence,
+            quality_bytes,
+            overlapping_start,
+            overlapping_end,
+            column_base
+        );
+
+#ifdef debug
+        std::cerr << "Got probability " << disruption_probability << std::endl;
+#endif
+
+        REQUIRE(disruption_probability != 0.0);
+    }
+}
+
+TEST_CASE("MinimizerMapper::faster_cap gives a finite cap even with very high qualities", "[giraffe][mapping][mapping_quality]") {
+
+    // Start with a sequence
+    std::string sequence = "GGCAACACAAGACATGTTTGGCACTAGTTGCAGATGAGACAGCTGCGGTTCACTTTCAAATGTGGGGTGATGAATGTGATGTTTTTGAGCCTGGGGATATCATCCGGTTAGAAAATGGCATCTTTTCTTATATTCGCAATAACCGTAATA";
+    // Say each base has the maximum possible quality.
+    std::string quality_bytes(sequence.size(), std::numeric_limits<uint8_t>::max());
+
+    // Find the minimizers in the sequence, which come out in read order.
+    std::vector<MinimizerMapper::Minimizer> minimizers = minimizers_in_sequence(sequence);
+    
+    // Make a vector of all minimizers so we can say we explored them all and they all need disrupting.
+    std::vector<size_t> minimizer_indices;
+    
+    // We should have minimizers 0-9 and 15-19, inclusive, to match https://github.com/vgteam/vg/issues/4645
+    for (size_t i = 0; i <= 9; i++) {
+        minimizer_indices.push_back(i);
+    }
+    for (size_t i = 15; i <= 19; i++) {
+        minimizer_indices.push_back(i);
+    }
+
+    double cap = TestMinimizerMapper::faster_cap(minimizers, minimizer_indices, sequence, quality_bytes);
+
+    std::cerr << "Cap was: " << cap << std::endl;
+
+    REQUIRE(!isinf(cap));
 }
 
 

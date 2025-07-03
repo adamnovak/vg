@@ -2809,6 +2809,7 @@ pair<vector<Alignment>, vector<Alignment>> MinimizerMapper::map_paired(Alignment
 
 //-----------------------------------------------------------------------------
 
+#define debug
 double MinimizerMapper::faster_cap(const VectorView<Minimizer>& minimizers, vector<size_t>& minimizers_explored,
     const string& sequence, const string& quality_bytes) {
 
@@ -2950,6 +2951,7 @@ double MinimizerMapper::faster_cap(const VectorView<Minimizer>& minimizers, vect
     double result = -c.back() * 10;
     return result;
 }
+#undef debug
 
 void MinimizerMapper::for_each_agglomeration_interval(const VectorView<Minimizer>& minimizers,
     const string& sequence, const string& quality_bytes,
