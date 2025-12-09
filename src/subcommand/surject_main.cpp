@@ -373,7 +373,7 @@ int main_surject(int argc, char** argv) {
         }
     }
 
-    Explainer::save_explanations = true;
+    Explainer::save_explanations = false;
 
     string file_name = get_input_file_name(optind, argc, argv);
 
