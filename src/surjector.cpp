@@ -15,6 +15,7 @@
 #include "reverse_graph.hpp"
 #include "subpath_overlay.hpp"
 #include "identity_overlay.hpp"
+#include "explainer.hpp"
 
 #include "algorithms/extract_connecting_graph.hpp"
 #include "algorithms/prune_to_connecting_graph.hpp"
@@ -3415,7 +3416,7 @@ using namespace std;
                     size_t total_edges = mp_aln_graph.count_reachability_edges();
                     cerr << "constructed reachability graph with " << total_edges << " edges" << endl;
 #endif
-
+                    
                     // we don't overlap this reference path at all or we filtered out all of the path chunks, so just make a sentinel
                     if (mp_aln_graph.empty()) {
                         surjected_aln.set_sequence(source.sequence());
@@ -3431,6 +3432,8 @@ using namespace std;
                     vector<size_t> topological_order;
                     mp_aln_graph.topological_sort(topological_order);
                     mp_aln_graph.remove_transitive_edges(topological_order);
+
+                    DotDumpExplainer<MultipathAlignmentGraph> exp(true, mp_aln_graph);
                     
                     if (!sinks_are_anchors && !sources_are_anchors) {
                         // We are allowed to create new sources and sinks.
