@@ -2478,6 +2478,7 @@ namespace vg {
         // They can be resected out of snarls just like the original ones.
     }
 
+
     void MultipathAlignmentGraph::add_reachability_edges(const HandleGraph& graph,
                                                          const function<pair<nid_t, bool>(nid_t)>& project,
                                                          const unordered_multimap<nid_t, pair<nid_t, bool>>& injection_trans,
