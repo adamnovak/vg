@@ -58,7 +58,8 @@ void help_surject(char** argv) {
          << "  -l, --subpath-local       let the multipath mapping surjection produce local" << endl
          << "                            (rather than global) alignments" << endl
          << "  -T, --max-tail-len N      only align up to N bases of read tails [10000]" << endl
-         << "  -e, --max-tail-cells N    only fill up to N alignment matrix cells for tails" << endl
+         << "  -e, --max-tail-cells N    only fill up to N alignment matrix cells for " << endl
+         << "                            tails" << endl
          << "                            (default: " << Surjector::DEFAULT_MAX_TAIL_CELLS << ")" << endl
          << "  -g, --max-graph-scale X   make reads unmapped if alignment target subgraph" << endl
          << "                            size exceeds read length by a factor of X " << endl
