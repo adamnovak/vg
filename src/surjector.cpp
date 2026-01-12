@@ -15,7 +15,6 @@
 #include "reverse_graph.hpp"
 #include "subpath_overlay.hpp"
 #include "identity_overlay.hpp"
-#include "explainer.hpp"
 
 #include "algorithms/extract_connecting_graph.hpp"
 #include "algorithms/prune_to_connecting_graph.hpp"
@@ -178,6 +177,11 @@ using namespace std;
             }
         }
 
+        std::cerr << "Before hiding supplementaries, have " << surjected.size() << " surjections";
+        for (auto& s : surjected) {
+            std::cerr << "\tScore: " << s.score() << " Length: " << s.sequence().size() << std::endl;
+        }
+
         add_SA_tag(surjected, positions_out, *graph, preserve_deletions);
 
 #ifdef debug_anchored_surject
@@ -194,6 +198,11 @@ using namespace std;
             cerr << endl;
         }
 #endif
+
+        std::cerr << "After hiding supplementaries, have " << surjected.size() << " surjections";
+        for (auto& s : surjected) {
+            std::cerr << "\tScore: " << s.score() << " Length: " << s.sequence().size() << std::endl;
+        }
 
 
         if (annotate_with_graph_alignment) {
@@ -250,6 +259,8 @@ using namespace std;
         }
         cerr << endl;
 #endif
+
+        std::cerr << "Surjecting onto " << paths.size() << " paths" << std::endl;
                 
         if (source_aln && source_aln->path().mapping_size() != 0) {
             // The read is mapped. Check the input alignment for basic
@@ -337,6 +348,10 @@ using namespace std;
         }
 #endif
         
+        for (const auto& surjection_record : path_overlapping_anchors) {
+            std::cerr << "Overlap with path " << graph->get_path_name(surjection_record.first.first) << ", rev? " << surjection_record.first.second << std::endl;
+        }
+
         // we want to remove anchors that can be error-prone: short anchors in the tails and anchors in
         // low complexity sequences
         for (auto it = path_overlapping_anchors.begin(); it != path_overlapping_anchors.end(); ++it) {
@@ -433,6 +448,24 @@ using namespace std;
                 transfer_read_metadata(*source_mp_aln, mp_alns_out->back());
             }
             else {
+                // We already constrained source_aln and alns_out to both be set if source_mp_aln is unset.
+                // But g++ 11.4 will warn that it thinks alns_out can be null here.
+                // Advise it that it can't.
+                // TODO: There's not a good way to actually silence a
+                // particular warning; we want to convince the compiler this
+                // can't happen without actually generating any code.
+#if __cplusplus >= 202302L
+                [[assume(alns_out)]];
+#elif __GNUC__ >= 13
+                __attribute__((__assume__(alns_out)));
+#elif defined(__clang__)
+                __builtin_assume(alns_out);
+#else
+                if (!alns_out) {
+                    __builtin_unreachable();
+                }
+#endif
+                
                 alns_out->emplace_back(make_null_alignment(*source_aln));
             }
             return;
@@ -448,6 +481,12 @@ using namespace std;
             }
         }
         
+        std::cerr << "aln_surjections entries: " << aln_surjections.size() << std::endl;
+        for (const auto& strand_surjections : aln_surjections) {
+            std::cerr << "\tstrand_surjections entries: " << strand_surjections.second.size() << std::endl;
+        }
+        
+
         // choose which path strands we will output
         vector<pair<path_handle_t, bool>> strands_to_output;
         if (multimap_to_all_paths) {
@@ -3406,7 +3445,7 @@ using namespace std;
                     size_t total_edges = mp_aln_graph.count_reachability_edges();
                     cerr << "constructed reachability graph with " << total_edges << " edges" << endl;
 #endif
-                    
+
                     // we don't overlap this reference path at all or we filtered out all of the path chunks, so just make a sentinel
                     if (mp_aln_graph.empty()) {
                         surjected_aln.set_sequence(source.sequence());
@@ -3422,8 +3461,6 @@ using namespace std;
                     vector<size_t> topological_order;
                     mp_aln_graph.topological_sort(topological_order);
                     mp_aln_graph.remove_transitive_edges(topological_order);
-
-                    DotDumpExplainer<MultipathAlignmentGraph> exp(true, mp_aln_graph);
                     
                     if (!sinks_are_anchors && !sources_are_anchors) {
                         // We are allowed to create new sources and sinks.
