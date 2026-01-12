@@ -1958,7 +1958,7 @@ IndexRegistry VGIndexes::get_vg_index_registry() {
         
         if (IndexingParameters::verbosity != IndexingParameters::None) {
             auto log_msg = info(context);
-            log_msg << " Constructing";
+            log_msg << "Constructing";
             if (has_transcripts) {
                 log_msg << " spliced";
             }
@@ -2606,7 +2606,7 @@ IndexRegistry VGIndexes::get_vg_index_registry() {
         // need a job to do them.
         unordered_set<path_handle_t> broadcast_graph_paths_to_do;
         if (include_named_paths && broadcast_graph) {
-            broadcast_graph->for_each_path_handle([&](const path_handle_t& path_handle) {
+            broadcast_graph->for_each_path_of_sense({PathSense::REFERENCE, PathSense::GENERIC}, [&](const path_handle_t& path_handle) {
                 // Look at all the paths in advance
                 if (broadcast_graph->is_empty(path_handle) || Paths::is_alt(broadcast_graph->get_path_name(path_handle))) {
                     // Skip empty paths and alt allele paths
@@ -4014,11 +4014,9 @@ IndexRegistry VGIndexes::get_vg_index_registry() {
         unique_ptr<gbwtgraph::SequenceSource> seq_source;
         tie(gbwt_index, seq_source) = gbwtgraph::gfa_to_gbwt(gfa_filename, params);
         
-        // convert sequences into gbwt graph
-        gbwtgraph::GBWTGraph gbwt_graph(*gbwt_index, *seq_source);
-        
-        // save together as a GBZ
-        save_gbz(*gbwt_index, gbwt_graph, output_name, IndexingParameters::verbosity == IndexingParameters::Debug);
+        // convert sequences into GBZ and save
+        gbwtgraph::GBZ gbz(gbwt_index, seq_source);
+        save_gbz(gbz, output_name, IndexingParameters::verbosity == IndexingParameters::Debug);
         
         output_names.push_back(output_name);
         return all_outputs;
@@ -4093,10 +4091,14 @@ IndexRegistry VGIndexes::get_vg_index_registry() {
         // don't bother with the normal loader/saver system.
         FlatFileBackTranslation translation(infile_translation);
 
-        gbwtgraph::GBZ gbz;
-        load_gbwt(gbz.index, gbwt_filename, IndexingParameters::verbosity == IndexingParameters::Debug);
-        // TODO: could add simplification to replace XG index with a gbwt::SequenceSource here
-        gbz.graph = gbwtgraph::GBWTGraph(gbz.index, *xg_index, &translation);
+        gbwt::GBWT index;
+        load_gbwt(index, gbwt_filename, IndexingParameters::verbosity == IndexingParameters::Debug);
+        gbwtgraph::GBZ gbz(std::move(index), *xg_index, &translation);
+
+        // We need to compute pggname manually, because a generic HandleGraph
+        // does not contain the name of the parent graph. And we use nullptr,
+        // because we currently cannot determine the name from another souce.
+        gbz.compute_pggname(nullptr);
 
         string output_name = plan->output_filepath(gbz_output);
         save_gbz(gbz, output_name, IndexingParameters::verbosity == IndexingParameters::Debug);
@@ -4131,10 +4133,14 @@ IndexRegistry VGIndexes::get_vg_index_registry() {
         init_in(infile_xg, xg_filename);
         auto xg_index = vg::io::VPKG::load_one<xg::XG>(infile_xg);
 
-        gbwtgraph::GBZ gbz;
-        load_gbwt(gbz.index, gbwt_filename, IndexingParameters::verbosity == IndexingParameters::Debug);
-        // TODO: could add simplification to replace XG index with a gbwt::SequenceSource here
-        gbz.graph = gbwtgraph::GBWTGraph(gbz.index, *xg_index, algorithms::find_translation(xg_index.get()));
+        gbwt::GBWT index;
+        load_gbwt(index, gbwt_filename, IndexingParameters::verbosity == IndexingParameters::Debug);
+        gbwtgraph::GBZ gbz(std::move(index), *xg_index, algorithms::find_translation(xg_index.get()));
+
+        // We need to compute pggname manually, because a generic HandleGraph
+        // does not contain the name of the parent graph. And we use nullptr,
+        // because we currently cannot determine the name from another souce.
+        gbz.compute_pggname(nullptr);
 
         string output_name = plan->output_filepath(gbz_output);
         save_gbz(gbz, output_name, IndexingParameters::verbosity == IndexingParameters::Debug);
@@ -4924,7 +4930,8 @@ bool IndexRegistry::gfa_has_haplotypes(const string& filepath) {
                     }
                 }
             }
-            else if (line_type == 'W') {
+            else if (line_type == 'W' || line_type == 'Z') {
+                // Ordinary or grammar-compressed walk line.
                 if (strm.get() != '\t') {
                     error(context) << "W-line does not have tab following line type" << endl;
                 }
