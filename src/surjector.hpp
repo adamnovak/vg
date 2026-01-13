@@ -253,6 +253,7 @@ using namespace std;
         /// Compute a set of end-inclusive intervals of path positions that the
         /// realign sequence could align to, and associate with each one a vector
         /// indexes into path_chunks to indicate which path chunks it contains.
+        /// The vector of indexes is ordered by position along the path.
         vector<tuple<size_t, size_t, vector<size_t>>>
         compute_disjoint_path_intervals(const PathPositionHandleGraph* graph, const Alignment& source, path_handle_t path_handle,
                                         bool rev_strand, const vector<path_chunk_t>& path_chunks,

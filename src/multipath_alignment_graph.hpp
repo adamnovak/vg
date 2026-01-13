@@ -145,6 +145,8 @@ namespace vg {
         
         /// Removes nodes and edges that are not part of any path that has an estimated score
         /// within some amount of the highest scoring path. Reachability edges must be present.
+        /// Assumes that edges cannot represent matches, and all matches are in paths.
+        /// So this really only works properly if all MEMs are actually maximal.
         void prune_to_high_scoring_paths(const Alignment& alignment, const GSSWAligner* aligner,
                                          double max_suboptimal_score_ratio, const vector<size_t>& topological_order,
                                          vector<size_t>& path_node_provenance);
@@ -257,6 +259,7 @@ namespace vg {
         /// Does the multipath alignment graph have any nodes?
         bool empty() const;
         
+        /// Get the number of PathNodes in the MultipathAlignmentGraph
         size_t size() const;
         
         /// For a graph with reachability edges, identifies the largest difference between read interval and

@@ -347,10 +347,18 @@ using namespace std;
             }
         }
 #endif
-        
-        for (const auto& surjection_record : path_overlapping_anchors) {
-            std::cerr << "Overlap with path " << graph->get_path_name(surjection_record.first.first) << ", rev? " << surjection_record.first.second << std::endl;
+        /*
+        if (source_aln) { 
+            for (const auto& surjection_record : path_overlapping_anchors) {
+                std::cerr << "Overlap with path " << graph->get_path_name(surjection_record.first.first) << ", rev? " << surjection_record.first.second << std::endl;
+                for (size_t i = 0; i < surjection_record.second.first.size(); ++i) {
+                    auto& anchor = surjection_record.second.first[i];
+                    cerr << "\tread[" << (anchor.first.first - source_aln->sequence().begin()) << ":" << (anchor.first.second - source_aln->sequence().begin()) << "] : " << endl;
+                    cerr << "\t\tpath interval " << graph->get_position_of_step(surjection_record.second.second[i].first) << " - " << graph->get_position_of_step(surjection_record.second.second[i].second) << endl;
+                }
+            }
         }
+        */
 
         // we want to remove anchors that can be error-prone: short anchors in the tails and anchors in
         // low complexity sequences
@@ -358,6 +366,18 @@ using namespace std;
             prune_and_trim_anchors(source_aln ? source_aln->sequence() : source_mp_aln->sequence(),
                                    it->second.first, it->second.second);
         }
+        
+        /*
+        if (source_aln) {
+            std::cerr << "After trimming:" << std::endl;
+            for (const auto& surjection_record : path_overlapping_anchors) {
+                for (size_t i = 0; i < surjection_record.second.first.size(); ++i) {
+                    auto& anchor = surjection_record.second.first[i];
+                    cerr << "\tread " << (anchor.first.first - source_aln->sequence().begin()) << "-" << (anchor.first.second - source_aln->sequence().begin()) << " = path " << graph->get_path_name(surjection_record.first.first) << (surjection_record.first.second ? "-" : "+") << " " << graph->get_position_of_step(surjection_record.second.second[i].first) << "-" << graph->get_position_of_step(surjection_record.second.second[i].second) << endl;
+                }
+            }
+        }
+        */
         
         // the surjected alignment for each path we overlapped
         unordered_map<pair<path_handle_t, bool>, vector<pair<Alignment, pair<step_handle_t, step_handle_t>>>> aln_surjections;
@@ -3181,6 +3201,8 @@ using namespace std;
             cerr << "\t" << string(path_chunks[i].first.first, path_chunks[i].first.second) << ", " << debug_string(path_chunks[i].second) << endl;
         }
 #endif
+
+        cerr << "using overlap chunks on path " << graph->get_path_name(path_handle) << " strand " << rev_strand << ", performing realigning surjection" << endl;
         
         // the alignments we will fill out
         vector<pair<Alignment, pair<step_handle_t, step_handle_t>>> surjected;
@@ -3207,6 +3229,14 @@ using namespace std;
             cerr << endl;
         }
 #endif
+
+        cerr << "assign chunks to intervals:" << endl;
+        for (const auto& ref_path_interval : ref_path_intervals) {
+            cerr << "Ref " << get<0>(ref_path_interval) << "-" << get<1>(ref_path_interval) << ": " << get<2>(ref_path_interval).size() << " chunks" << std::endl;
+            if (get<2>(ref_path_interval).size() > 0) {
+                std::cerr << "\tFrom " << debug_string(path_chunks[get<2>(ref_path_interval).front()].second) << " to " << debug_string(path_chunks[get<2>(ref_path_interval).back()].second) << std::endl;
+            }
+        }
         
         // having a buffer helps ensure that we get the correct anchoring position for some edge cases
         // of a full deletion that occurs on a node boundary
@@ -3314,6 +3344,7 @@ using namespace std;
 #ifdef debug_anchored_surject
                 cerr << "ref path interval " << interval_idx << " of " << ref_path_intervals.size() << " is " << ref_interval_begin << ":" << ref_interval_end << " on path of length " << path_position_graph->get_path_length(path_handle) << endl;
 #endif
+                cerr << "ref path interval " << interval_idx << " of " << ref_path_intervals.size() << " is " << ref_interval_begin << ":" << ref_interval_end << " on path of length " << path_position_graph->get_path_length(path_handle) << endl;
                 
                 // If we put in path chunks we need to have ended up with a
                 // nonempty path interval that they cover.
@@ -3342,6 +3373,8 @@ using namespace std;
 #ifdef debug_anchored_surject
                 cerr << "made split, linearized path graph with " << aln_graph->get_node_count() << " nodes" << endl;
 #endif
+
+                cerr << "made split, linearized path graph with " << aln_graph->get_node_count() << " nodes" << endl;
                 
                 std::function<pair<id_t, bool>(id_t)> projection_trans = [&](id_t node_id) {
                     handle_t handle = path_graph.get_underlying_handle(aln_graph->get_underlying_handle(aln_graph->get_handle(node_id)));
@@ -3401,6 +3434,12 @@ using namespace std;
                     }
                 }
 #endif
+
+                if (!subset_path_chunks.empty()) {
+                    cerr << "interval sequence of size " << mp_aln_source->sequence().size() << " contains a subset of path chunks: " << subset_path_chunks.size() << " path chunks" << endl;
+                }
+
+
                 auto normal_aligner = get_aligner(!source.quality().empty());
                 // check whether it's necessary to do any alignment in this interval
                 if (mp_aln_path_chunks->size() == 1 &&
@@ -3440,10 +3479,10 @@ using namespace std;
                     bool preserve_tail_indel_anchors = (sinks_are_anchors || sources_are_anchors);
                     MultipathAlignmentGraph mp_aln_graph(*aln_graph, *mp_aln_path_chunks, *mp_aln_source, projection_trans, !preserve_N_alignments,
                                                          preserve_tail_indel_anchors);
-                    
+#define debug_anchored_surject    
 #ifdef debug_anchored_surject
                     size_t total_edges = mp_aln_graph.count_reachability_edges();
-                    cerr << "constructed reachability graph with " << total_edges << " edges" << endl;
+                    cerr << "constructed reachability graph with " << total_edges << " edges between " << mp_aln_graph.size() << " path nodes" << endl;
 #endif
 
                     // we don't overlap this reference path at all or we filtered out all of the path chunks, so just make a sentinel
@@ -3523,7 +3562,8 @@ using namespace std;
                         // translate back into the original ID space
                         translate_oriented_node_ids(*mp_aln.mutable_subpath(i)->mutable_path(), projection_trans);
                     }
-                    
+
+#undef debug_anchored_surject 
 #ifdef debug_anchored_surject
                     cerr << "made multipath alignment " << debug_string(mp_aln) << endl;
 #endif
@@ -3536,6 +3576,12 @@ using namespace std;
                     // concatenate the subpaths either locally or globally, depending on whether we're
                     // allowing negative scores
                     optimal_alignment(mp_aln, surjected_aln, allow_negative_scores);
+
+                    std::cerr << "Optimal alignment score: " << surjected_aln.score() << std::endl;
+                    std::cerr << "Optimal alignment mapping count: " << surjected_aln.path().mapping_size() << std::endl;
+                    if (!allow_negative_scores) {
+                        crash_unless(surjected_aln.score() >= 0);
+                    }
                 }
                 
                 surjected_aln.set_sequence(source.sequence());
