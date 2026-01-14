@@ -972,5 +972,140 @@ TEST_CASE("Supplementary alignments can be generated", "[surject]") {
     }
 }
 
+
+TEST_CASE( "Surjection can sort out a complex dotplot with multiple passes", "[surject]" ) {
+    
+    // How many nodes will we use?
+    const size_t SCALE = 100;
+
+    // How many loops will we put in the graph for the path?
+    const size_t PATH_LOOP_COUNT = 2;
+    // How many times will the path go through each loop?
+    const size_t PATH_LOOP_ITERATIONS = 3;
+
+    // How many loops will we out in the graph for the read?
+    const size_t READ_LOOP_COUNT = 3;
+    // How many times will the read go through each loop?
+    const size_t READ_LOOP_ITERATIONS = 2;
+
+    // How many bases of anchor should we have before dropping off path?
+    const size_t DROP_PERIOD = 10;
+
+    // We use a sequence that will fool the low-complexity estimation
+    const std::string SEQUENCE = "GATTACACATTAGACATCGATCGATGCGCGATTATCTGATCAG";
+
+    // Make a stick graph
+    bdsg::HashGraph graph;
+    std::vector<handle_t> nodes;
+    for (size_t i = 0; i < SCALE; i++) {
+        nodes.push_back(graph.create_handle(SEQUENCE.substr(i % SEQUENCE.size(), 1)));
+        if (nodes.size() > 1) {
+            graph.create_edge(nodes[nodes.size() - 2], nodes[nodes.size() - 1]);
+        }
+    }
+    
+    // Put a path on it
+    path_handle_t p = graph.create_path_handle("p");
+    for (size_t i = 0; i < PATH_LOOP_COUNT; i++) {
+        // Make a loop
+        size_t start_index = SCALE * i / PATH_LOOP_COUNT;
+        size_t past_end_index = SCALE * (i + 1) / PATH_LOOP_COUNT;
+        if (!graph.has_edge(nodes[start_index], nodes[past_end_index - 1])) {
+            graph.create_edge(nodes[start_index], nodes[past_end_index - 1]);
+        }
+        for (size_t j = 0; j < PATH_LOOP_ITERATIONS; j++) {
+            // Go through the loop the right number of times
+            for (size_t here = start_index; here < past_end_index; here++) {
+                graph.append_step(p, nodes[here]);
+            }
+        }
+    }
+    
+    // Track off_path nodes used by the read.
+    std::unordered_map<size_t, handle_t> alt_nodes;
+
+    // Make a read path. This doesn't need to be restricted to the graph's edges, but it might as well be. 
+    vector<handle_t> read_path;
+    for (size_t i = 0; i < READ_LOOP_COUNT; i++) {
+        // Make a loop
+        size_t start_index = SCALE * i / READ_LOOP_COUNT;
+        size_t past_end_index = SCALE * (i + 1) / READ_LOOP_COUNT;
+        if (!graph.has_edge(nodes[start_index], nodes[past_end_index - 1])) {
+            graph.create_edge(nodes[start_index], nodes[past_end_index - 1]);
+        }
+        for (size_t j = 0; j < READ_LOOP_ITERATIONS; j++) {
+            // Go through the loop the right number of times
+            for (size_t here = start_index; here < past_end_index; here++) {
+
+                if (read_path.size() % DROP_PERIOD + 1 == DROP_PERIOD) {
+                    // We need to break the anchor here
+                    
+                    auto found = alt_nodes.find(here);
+                    if (found == alt_nodes.end()) {
+                        // Create an alternate node and wire it up
+                        std::string true_sequence = graph.get_sequence(nodes[here]);
+                        std::string alt_sequence = reverse_complement(true_sequence);
+                        handle_t alt_handle = graph.create_handle(alt_sequence);
+                        graph.follow_edges(nodes[here], false, [&](const handle_t& successor) {
+                            graph.create_edge(alt_handle, successor);
+                        });
+                        graph.follow_edges(nodes[here], true, [&](const handle_t& predecessor) {
+                            graph.create_edge(predecessor, alt_handle);
+                        });
+
+                        found = alt_nodes.emplace_hint(found, here, alt_handle);
+                    }
+
+                    read_path.push_back(found->second);
+                    std::cerr << "Dropped base at " << read_path.size() << std::endl;
+                } else {
+                    // Follow the normal read loop path here
+                    read_path.push_back(nodes[here]);
+                }
+            }
+        }
+    }
+    
+    // Make the read path into an alignment
+    Alignment read;
+    string seq;
+    Path* rpath = read.mutable_path();
+    for (handle_t h : read_path) {
+        Mapping* m = rpath->add_mapping();
+        m->set_rank(rpath->mapping_size());
+        m->mutable_position()->set_node_id(graph.get_id(h));
+        Edit* e = m->add_edit();
+        e->set_from_length(graph.get_length(h));
+        e->set_to_length(graph.get_length(h));
+        seq += graph.get_sequence(h);
+    }
+    read.set_sequence(seq);
+    
+    read.set_score(Aligner().score_contiguous_alignment(read));
+
+    std::cerr << pb2json(read) << std::endl;
+   
+    // Prepare the surjector
+    bdsg::PositionOverlay pos_graph(&graph);
+    Surjector surjector(&pos_graph);
+
+    // Surject the read in non-spliced mode
+    unordered_set<path_handle_t> paths{pos_graph.get_path_handle(graph.get_path_name(p))};
+    vector<Alignment> surjected_alns = surjector.surject(read, paths, true, false);
+    
+    // We should get just one surjection
+    REQUIRE(surjected_alns.size() == 1);
+    auto& surjected = surjected_alns.front();
+
+    std::cerr << pb2json(surjected) << std::endl;
+   
+    // Should not lose any bases
+    REQUIRE(surjected.sequence() == read.sequence());
+
+    // Since both sets of loops start and end in phase we should have at least
+    // one run through the smaller loop of perfect matches, at the drop rate of mismatches.
+    REQUIRE(surjected.score() >= std::min(SCALE / PATH_LOOP_COUNT, SCALE / READ_LOOP_COUNT) * ((DROP_PERIOD - 1) / (double) (DROP_PERIOD + 1)));
+}
+
 }
 }

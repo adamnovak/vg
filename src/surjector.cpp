@@ -367,7 +367,7 @@ using namespace std;
                                    it->second.first, it->second.second);
         }
         
-        /*
+        
         if (source_aln) {
             std::cerr << "After trimming:" << std::endl;
             for (const auto& surjection_record : path_overlapping_anchors) {
@@ -377,7 +377,7 @@ using namespace std;
                 }
             }
         }
-        */
+        
         
         // the surjected alignment for each path we overlapped
         unordered_map<pair<path_handle_t, bool>, vector<pair<Alignment, pair<step_handle_t, step_handle_t>>>> aln_surjections;
