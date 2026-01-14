@@ -6478,12 +6478,14 @@ void MultipathAlignmentGraph::align(const Alignment& alignment, const HandleGrap
                                                                                            end_pos,
                                                                                            false,         // search forward
                                                                                            false);        // no need to preserve cycles (in a DAG)
-                
+
+#define debug_multipath_alignment
 #ifdef debug_multipath_alignment
                 std::cerr << "Going to align " << aligning_tail_length << "/" << tail_length
                         << " bp of tail against " << tail_graph.get_total_length()
                         << " bp of graph extracted for target length " << target_length << std::endl;
 #endif
+#undef debug_multipath_alignment
 
                 size_t num_alt_alns;
                 if (dynamic_alt_alns) {
@@ -6604,6 +6606,11 @@ void MultipathAlignmentGraph::align(const Alignment& alignment, const HandleGrap
                     cerr << i << ": " << pb2json(alt_alignments[i]) << endl;
                 }
 #endif
+
+                cerr << "made " << alt_alignments.size() << " tail alignments" << endl;
+                for (size_t i = 0; i < alt_alignments.size(); ++i) {
+                    cerr << i << ": " << alt_alignments[i].score() << " points" << endl;
+                }
 
                 if (aligning_tail_length < tail_length) {
                     // Tail is too long. Just make a softclip directly in the base graph ID space.

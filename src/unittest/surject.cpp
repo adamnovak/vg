@@ -979,19 +979,22 @@ TEST_CASE( "Surjection can sort out a complex dotplot with multiple passes", "[s
     const size_t SCALE = 100;
 
     // How many loops will we put in the graph for the path?
-    const size_t PATH_LOOP_COUNT = 2;
+    const size_t PATH_LOOP_COUNT = 1;
     // How many times will the path go through each loop?
     const size_t PATH_LOOP_ITERATIONS = 3;
 
     // How many loops will we out in the graph for the read?
-    const size_t READ_LOOP_COUNT = 3;
+    const size_t READ_LOOP_COUNT = 1;
     // How many times will the read go through each loop?
-    const size_t READ_LOOP_ITERATIONS = 2;
+    const size_t READ_LOOP_ITERATIONS = 3;
 
     // How many bases should the on-path/off-path pattern loop for?
     const size_t DROP_PERIOD = 10;
     // Of those, how many should be on path?
     const size_t DROP_AFTER = 3;
+
+    // Do an insert every how many bases?
+    const size_t INSERT_PERIOD = 53;
 
     // We use a sequence that will fool the low-complexity estimation
     const std::string SEQUENCE = "GATTACACATTAGACATCGATCGATGCGCGATTATCTGATCAG";
@@ -1073,7 +1076,8 @@ TEST_CASE( "Surjection can sort out a complex dotplot with multiple passes", "[s
     Alignment read;
     string seq;
     Path* rpath = read.mutable_path();
-    for (handle_t h : read_path) {
+    for (size_t i = 0; i < read_path.size(); i++) {
+        const handle_t& h = read_path[i];
         Mapping* m = rpath->add_mapping();
         m->set_rank(rpath->mapping_size());
         m->mutable_position()->set_node_id(graph.get_id(h));
@@ -1081,16 +1085,26 @@ TEST_CASE( "Surjection can sort out a complex dotplot with multiple passes", "[s
         e->set_from_length(graph.get_length(h));
         e->set_to_length(graph.get_length(h));
         seq += graph.get_sequence(h);
+
+        if (i % INSERT_PERIOD + 1 == INSERT_PERIOD) {
+            // Add an inserted base
+            Edit* e2 = m->add_edit();
+            e2->set_from_length(0);
+            e2->set_to_length(1);
+            e2->set_sequence("A");
+            seq += "A";
+        }
     }
     read.set_sequence(seq);
     
     read.set_score(Aligner().score_contiguous_alignment(read));
 
-    std::cerr << pb2json(read) << std::endl;
-   
     // Prepare the surjector
     bdsg::PositionOverlay pos_graph(&graph);
     Surjector surjector(&pos_graph);
+
+    // Limit the max tail length to make sure it actually uses reachability edges.
+    surjector.max_tail_length = 20;
 
     // Surject the read in non-spliced mode
     unordered_set<path_handle_t> paths{pos_graph.get_path_handle(graph.get_path_name(p))};
@@ -1100,14 +1114,12 @@ TEST_CASE( "Surjection can sort out a complex dotplot with multiple passes", "[s
     REQUIRE(surjected_alns.size() == 1);
     auto& surjected = surjected_alns.front();
 
-    std::cerr << pb2json(surjected) << std::endl;
-   
     // Should not lose any bases
     REQUIRE(surjected.sequence() == read.sequence());
 
     // Since both sets of loops start and end in phase we should have at least
-    // one run through the smaller loop of perfect matches, at the drop rate of mismatches.
-    REQUIRE(surjected.score() >= std::min(SCALE / PATH_LOOP_COUNT, SCALE / READ_LOOP_COUNT) * ((DROP_PERIOD - 1) / (double) (DROP_PERIOD + 1)));
+    // one run through the smaller loop of perfect matches.
+    REQUIRE(surjected.score() >= std::min(SCALE / PATH_LOOP_COUNT, SCALE / READ_LOOP_COUNT));
 }
 
 }
