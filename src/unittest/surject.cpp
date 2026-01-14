@@ -988,8 +988,10 @@ TEST_CASE( "Surjection can sort out a complex dotplot with multiple passes", "[s
     // How many times will the read go through each loop?
     const size_t READ_LOOP_ITERATIONS = 2;
 
-    // How many bases of anchor should we have before dropping off path?
+    // How many bases should the on-path/off-path pattern loop for?
     const size_t DROP_PERIOD = 10;
+    // Of those, how many should be on path?
+    const size_t DROP_AFTER = 3;
 
     // We use a sequence that will fool the low-complexity estimation
     const std::string SEQUENCE = "GATTACACATTAGACATCGATCGATGCGCGATTATCTGATCAG";
@@ -1037,14 +1039,15 @@ TEST_CASE( "Surjection can sort out a complex dotplot with multiple passes", "[s
             // Go through the loop the right number of times
             for (size_t here = start_index; here < past_end_index; here++) {
 
-                if (read_path.size() % DROP_PERIOD + 1 == DROP_PERIOD) {
+                if (read_path.size() % DROP_PERIOD >= DROP_AFTER) {
                     // We need to break the anchor here
                     
                     auto found = alt_nodes.find(here);
                     if (found == alt_nodes.end()) {
                         // Create an alternate node and wire it up
                         std::string true_sequence = graph.get_sequence(nodes[here]);
-                        std::string alt_sequence = reverse_complement(true_sequence);
+                        // It should have the same sequence as the on-path node so we know it surjects to a match.
+                        std::string alt_sequence = true_sequence;
                         handle_t alt_handle = graph.create_handle(alt_sequence);
                         graph.follow_edges(nodes[here], false, [&](const handle_t& successor) {
                             graph.create_edge(alt_handle, successor);
