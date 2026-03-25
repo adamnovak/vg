@@ -695,6 +695,7 @@ void help_giraffe(char** argv, const BaseOptionGroup& parser, const std::map<std
              << "      --report-name FILE        write a TSV of output file and mapping speed" << endl
              << "      --show-work               log how the mapper comes to its conclusions" << endl
              << "                                about mapping locations (use one read at a time)" << endl;
+             
     }
 
     if (full_help) {
@@ -715,7 +716,8 @@ void help_giraffe(char** argv, const BaseOptionGroup& parser, const std::map<std
              << "                                (implies --track-provenance)" << endl
              << "      --track-position          coarsely track linear reference positions of" << endl
              << "                                good intermediate alignment candidates" << endl
-             << "                                (implies --track-provenance)" << endl;
+             << "                                (implies --track-provenance)" << endl
+             << "      --haplotype-positions     index all haplotypes for position reporting" << endl;
              
 
         auto helps = parser.get_help();
@@ -739,21 +741,25 @@ int main_giraffe(int argc, char** argv) {
     constexpr int OPT_OUTPUT_BASENAME = 1000;
     constexpr int OPT_REPORT_NAME = 1001;
     constexpr int OPT_SET_REFPOS = 1002;
-    constexpr int OPT_TRACK_PROVENANCE = 1003;
-    constexpr int OPT_TRACK_CORRECTNESS = 1004;
-    constexpr int OPT_TRACK_POSITION = 1005;
-    constexpr int OPT_FRAGMENT_MEAN = 1006;
-    constexpr int OPT_FRAGMENT_STDEV = 1007;
-    constexpr int OPT_REF_PATHS = 1008;
-    constexpr int OPT_REF_NAME = 1009;
-    constexpr int OPT_SHOW_WORK = 1010;
+    constexpr int OPT_FRAGMENT_MEAN = 1003;
+    constexpr int OPT_FRAGMENT_STDEV = 1004;
+    constexpr int OPT_REF_PATHS = 1005;
+    constexpr int OPT_REF_NAME = 1006;
     constexpr int OPT_NAMED_COORDINATES = 1011;
     constexpr int OPT_ADD_GRAPH_ALIGNMENT = 1012;
     constexpr int OPT_COMMENTS_AS_TAGS = 1013;
     constexpr int OPT_HAPLOTYPE_NAME = 1100;
+
     constexpr int OPT_KFF_NAME = 1101;
     constexpr int OPT_INDEX_BASENAME = 1102;
     constexpr int OPT_SET_REFERENCE = 1103;
+
+    constexpr int OPT_TRACK_PROVENANCE = 1201;
+    constexpr int OPT_TRACK_CORRECTNESS = 1202;
+    constexpr int OPT_TRACK_POSITION = 1203;
+    constexpr int OPT_HAPLOTYPE_POSITIONS = 1204;
+    constexpr int OPT_SHOW_WORK = 1205;
+
 
 
     // initialize parameters with their default options
@@ -818,6 +824,10 @@ int main_giraffe(int argc, char** argv) {
     bool track_position = MinimizerMapper::default_track_position;
     // Should we log our mapping decision making?
     bool show_work = MinimizerMapper::default_show_work;
+    // Should we index all haplotypes for more informative logs and dumps?
+    bool haplotype_positions = false;
+    // TODO: We could also add machinery to index particular haplotypes for
+    // debugging using positions on them.
     
     // Should we throw out our alignments instead of outputting them?
     bool discard_alignments = false;
@@ -1093,6 +1103,7 @@ int main_giraffe(int argc, char** argv) {
         {"track-provenance", no_argument, 0, OPT_TRACK_PROVENANCE},
         {"track-correctness", no_argument, 0, OPT_TRACK_CORRECTNESS},
         {"track-position", no_argument, 0, OPT_TRACK_POSITION},
+        {"haplotype-positions", no_argument, 0, OPT_HAPLOTYPE_POSITIONS},
         {"show-work", no_argument, 0, OPT_SHOW_WORK},
         {"threads", required_argument, 0, 't'},
     };
@@ -1328,6 +1339,10 @@ int main_giraffe(int argc, char** argv) {
             case OPT_TRACK_POSITION:
                 track_provenance = true;
                 track_position = true;
+                break;
+
+            case OPT_HAPLOTYPE_POSITIONS:
+                haplotype_positions = true;
                 break;
                 
             case OPT_SHOW_WORK:
@@ -1682,7 +1697,7 @@ int main_giraffe(int argc, char** argv) {
         // If we want to be able to spit out positions along haplotype paths,
         // for debugging, we need to index them for position queries.
         std::unordered_set<std::string> extra_indexed_paths;
-        if (show_work) {
+        if (haplotype_positions) {
             base_graph->for_each_path_of_sense(PathSense::HAPLOTYPE, [&](const path_handle_t& path) {
                 // Say every haplotype path is in the "extra" path set to
                 // index, so we index everything.
@@ -1804,10 +1819,11 @@ int main_giraffe(int argc, char** argv) {
         minimizer_mapper.set_refpos = set_refpos;
         report_flag("track-provenance", track_provenance);
         minimizer_mapper.track_provenance = track_provenance;
-        report_flag("track-position", track_position);
-        minimizer_mapper.track_position = track_position;
         report_flag("track-correctness", track_correctness);
         minimizer_mapper.track_correctness = track_correctness;
+        report_flag("track-position", track_position);
+        minimizer_mapper.track_position = track_position;
+        report_flag("haplotype-positions", haplotype-positions);
         report_flag("show-work", show_work);
         minimizer_mapper.show_work = show_work;
         if (paired) {
